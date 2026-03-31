@@ -12,6 +12,7 @@ import { PayrollListPage } from "@/pages/employer/PayrollListPage";
 import { PayrollCreatePage } from "@/pages/employer/PayrollCreatePage";
 import { PayrollDetailPage } from "@/pages/employer/PayrollDetailPage";
 import { MockTokenPage } from "@/pages/mock/MockTokenPage";
+import { DocsPage } from "@/pages/DocsPage";
 
 export const router = createBrowserRouter([
   {
@@ -37,6 +38,7 @@ export const router = createBrowserRouter([
         ],
       },
 
+      { path: "docs", element: <DocsPage /> },
       { path: "mock", element: <MockTokenPage /> },
     ],
   },

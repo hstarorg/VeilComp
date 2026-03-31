@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from "react-router-dom";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { Building2 } from "lucide-react";
+import { Building2, BookOpen } from "lucide-react";
 import logoSvg from "@/assets/logo.svg";
 import { useApp } from "@/contexts/AppContext";
 
@@ -36,7 +36,20 @@ export function Layout() {
             )}
           </div>
 
-          <ConnectButton showBalance={true} />
+          <div className="flex items-center gap-4">
+            <Link
+              to="/docs"
+              className={`flex items-center gap-1.5 text-xs font-medium transition ${
+                location.pathname === "/docs"
+                  ? "text-gray-200"
+                  : "text-gray-500 hover:text-gray-300"
+              }`}
+            >
+              <BookOpen className="h-3.5 w-3.5" />
+              Docs
+            </Link>
+            <ConnectButton showBalance={true} />
+          </div>
         </div>
       </header>
 
