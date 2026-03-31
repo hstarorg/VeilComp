@@ -1,11 +1,13 @@
 import { createBrowserRouter } from "react-router-dom";
 import { Layout } from "@/components/common/Layout";
+import { EmployerLayout } from "@/components/common/EmployerLayout";
 import { HomePage } from "@/pages/HomePage";
 import { CompensationPage } from "@/pages/employee/CompensationPage";
 import { EmployerHome } from "@/pages/employer/EmployerHome";
 import { DeployPage } from "@/pages/employer/DeployPage";
 import { DashboardPage } from "@/pages/employer/DashboardPage";
 import { EmployeesPage } from "@/pages/employer/EmployeesPage";
+import { SettingsPage } from "@/pages/employer/SettingsPage";
 import { PayrollListPage } from "@/pages/employer/PayrollListPage";
 import { PayrollCreatePage } from "@/pages/employer/PayrollCreatePage";
 import { PayrollDetailPage } from "@/pages/employer/PayrollDetailPage";
@@ -20,11 +22,21 @@ export const router = createBrowserRouter([
       { path: "company/:address", element: <CompensationPage /> },
       { path: "employer", element: <EmployerHome /> },
       { path: "employer/deploy", element: <DeployPage /> },
-      { path: "employer/:address", element: <DashboardPage /> },
-      { path: "employer/:address/employees", element: <EmployeesPage /> },
-      { path: "employer/:address/payroll", element: <PayrollListPage /> },
-      { path: "employer/:address/payroll/new", element: <PayrollCreatePage /> },
-      { path: "employer/:address/payroll/:runId", element: <PayrollDetailPage /> },
+
+      // Employer contract management — with sidebar
+      {
+        path: "employer/:address",
+        element: <EmployerLayout />,
+        children: [
+          { index: true, element: <DashboardPage /> },
+          { path: "employees", element: <EmployeesPage /> },
+          { path: "payroll", element: <PayrollListPage /> },
+          { path: "payroll/new", element: <PayrollCreatePage /> },
+          { path: "payroll/:runId", element: <PayrollDetailPage /> },
+          { path: "settings", element: <SettingsPage /> },
+        ],
+      },
+
       { path: "mock", element: <MockTokenPage /> },
     ],
   },

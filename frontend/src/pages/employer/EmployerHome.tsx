@@ -62,9 +62,9 @@ export function EmployerHome() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">My Payroll Contracts</h1>
+        <h1 className="text-2xl font-bold">My Contracts</h1>
         <Link to="/employer/deploy">
-          <Button size="sm"><Plus className="mr-1 h-4 w-4" /> New Payroll</Button>
+          <Button size="sm"><Plus className="mr-1 h-4 w-4" /> New Contract</Button>
         </Link>
       </div>
 
@@ -73,13 +73,13 @@ export function EmployerHome() {
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
             <Rocket className="h-10 w-10 text-indigo-400/50" />
             <div>
-              <p className="text-gray-400">No payroll contracts yet</p>
+              <p className="text-gray-400">No contracts yet</p>
               <p className="mt-1 max-w-xs text-xs text-gray-600">
-                Deploy your first payroll contract to start paying your team confidentially.
+                Deploy your first contract to start paying your team confidentially.
               </p>
             </div>
             <Link to="/employer/deploy">
-              <Button>Deploy Payroll Contract</Button>
+              <Button>Deploy Contract</Button>
             </Link>
           </CardContent>
         </Card>

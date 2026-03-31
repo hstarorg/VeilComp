@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { Address } from "viem";
-import { ArrowLeft, Plus, CalendarCheck, Users, ArrowRight } from "lucide-react";
+import { Plus, CalendarCheck, Users, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -67,12 +67,9 @@ export function PayrollListPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link to={`/employer/${payrollAddr}`}><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button></Link>
-          <h1 className="text-2xl font-bold">Monthly Payroll</h1>
-        </div>
+        <h1 className="text-2xl font-bold">Pay Runs</h1>
         <Link to={`/employer/${payrollAddr}/payroll/new`}>
-          <Button><Plus className="mr-2 h-4 w-4" /> New Payroll</Button>
+          <Button><Plus className="mr-2 h-4 w-4" /> New Pay Run</Button>
         </Link>
       </div>
 
@@ -82,12 +79,12 @@ export function PayrollListPage() {
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <CalendarCheck className="h-10 w-10 text-gray-700" />
-            <p className="text-gray-400">No payroll runs yet</p>
+            <p className="text-gray-400">No pay runs yet</p>
             <p className="max-w-xs text-xs text-gray-600">
-              Create your first monthly payroll to start paying employees.
+              Create your first pay run to start paying employees.
             </p>
             <Link to={`/employer/${payrollAddr}/payroll/new`}>
-              <Button><Plus className="mr-2 h-4 w-4" /> New Payroll</Button>
+              <Button><Plus className="mr-2 h-4 w-4" /> New Pay Run</Button>
             </Link>
           </CardContent>
         </Card>

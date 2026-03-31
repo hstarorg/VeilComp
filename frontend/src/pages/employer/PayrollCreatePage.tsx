@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import type { Address } from "viem";
-import { ArrowLeft, ListChecks, Loader2 } from "lucide-react";
+import { ListChecks, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PAYROLL_ABI } from "@/utils/contracts";
@@ -64,20 +64,17 @@ export function PayrollCreatePage() {
       });
       await publicClient.waitForTransactionReceipt({ hash });
 
-      toast.success(`Payroll #${count} created. Now deposit funds to continue.`);
+      toast.success(`Pay run #${count} created. Now deposit funds to continue.`);
       navigate(`/employer/${payrollAddr}/payroll/${count}`);
     } catch (err: any) {
-      toast.error(err.shortMessage || err.message || "Failed to create payroll");
+      toast.error(err.shortMessage || err.message || "Failed to create pay run");
       setCreating(false);
     }
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-3">
-        <Link to={`/employer/${payrollAddr}/payroll`}><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button></Link>
-        <h1 className="text-2xl font-bold">New Payroll</h1>
-      </div>
+      <h1 className="text-2xl font-bold">New Pay Run</h1>
 
       <Card>
         <CardHeader>

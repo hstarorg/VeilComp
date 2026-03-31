@@ -40,7 +40,6 @@ export const PAYROLL_ABI = [
   { type: "function", name: "getMySalary", inputs: [], outputs: [{ type: "bytes32" }], stateMutability: "view" },
   { type: "function", name: "getMyBalance", inputs: [], outputs: [{ type: "bytes32" }], stateMutability: "view" },
   // Payroll runs
-  { type: "function", name: "taxDivisor", inputs: [], outputs: [{ type: "uint64" }], stateMutability: "view" },
   { type: "function", name: "nextRunId", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
   { type: "function", name: "createPayrollRun", inputs: [{ name: "employees", type: "address[]" }], outputs: [{ name: "runId", type: "uint256" }], stateMutability: "nonpayable" },
   { type: "function", name: "executePayrollRunBatch", inputs: [{ name: "runId", type: "uint256" }, { name: "fromIndex", type: "uint256" }, { name: "toIndex", type: "uint256" }], outputs: [], stateMutability: "nonpayable" },
@@ -48,7 +47,6 @@ export const PAYROLL_ABI = [
   { type: "function", name: "getRunEmployees", inputs: [{ name: "runId", type: "uint256" }], outputs: [{ type: "address[]" }], stateMutability: "view" },
   { type: "function", name: "getRunTotalPaid", inputs: [{ name: "runId", type: "uint256" }], outputs: [{ type: "bytes32" }], stateMutability: "view" },
   { type: "function", name: "getRunCount", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
-  { type: "function", name: "setTaxRate", inputs: [{ name: "divisor", type: "uint64" }], outputs: [], stateMutability: "nonpayable" },
   // Withdraw
   { type: "function", name: "requestWithdraw", inputs: [{ name: "amount", type: "uint256" }], outputs: [{ name: "id", type: "uint256" }], stateMutability: "nonpayable" },
   // Events
