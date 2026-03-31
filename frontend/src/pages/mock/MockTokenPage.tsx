@@ -189,7 +189,7 @@ export function MockTokenPage() {
               className="text-xs"
             />
             <Button onClick={handleMint} disabled={minting || !selectedToken || !mintAmount} className="w-full" size="sm">
-              {minting ? "Minting..." : "Mint"}
+              {minting ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> Minting</> : "Mint"}
             </Button>
             {balance !== null && (
               <p className="flex items-center gap-1 text-xs">

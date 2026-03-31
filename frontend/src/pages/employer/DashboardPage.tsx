@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { Address } from "viem";
 import { formatUnits } from "viem";
-import { Users, Hash, Coins, Plus, AlertTriangle, CalendarCheck } from "lucide-react";
+import { Users, Hash, Coins, Plus, AlertTriangle, CalendarCheck, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,11 +26,12 @@ export function DashboardPage() {
 
   async function loadData() {
     if (!publicClient || !payrollAddr) return;
+    const opts = { blockTag: 'latest' as const };
     const [count, runs, pool, token] = await Promise.all([
-      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getEmployeeCount" }),
-      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getRunCount" }),
-      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getPoolBalance" }),
-      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "payToken" }),
+      publicClient.readContract({ ...opts, address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getEmployeeCount" }),
+      publicClient.readContract({ ...opts, address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getRunCount" }),
+      publicClient.readContract({ ...opts, address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getPoolBalance" }),
+      publicClient.readContract({ ...opts, address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "payToken" }),
     ]);
     setEmployeeCount(Number(count));
     setRunCount(Number(runs));
@@ -70,7 +71,7 @@ export function DashboardPage() {
 
       toast.success(`Deposited ${depositAmount} ${tokenSymbol}`);
       setDepositAmount("");
-      loadData();
+      await loadData();
     } catch (err: any) {
       toast.error(err.shortMessage || err.message || "Deposit failed");
     } finally {
@@ -115,7 +116,7 @@ export function DashboardPage() {
               placeholder={`Amount (${tokenSymbol})`}
             />
             <Button onClick={handleDeposit} disabled={depositing || !depositAmount} variant="success">
-              {depositing ? "..." : "Deposit"}
+              {depositing ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Depositing</> : "Deposit"}
             </Button>
           </div>
           <p className="text-xs text-gray-600">Approve + deposit in two transactions.</p>

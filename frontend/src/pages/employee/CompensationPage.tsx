@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { Address } from "viem";
-import { ArrowLeft, DollarSign, Wallet, Building2, ArrowDownToLine } from "lucide-react";
+import { ArrowLeft, DollarSign, Wallet, Building2, ArrowDownToLine, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -150,7 +150,7 @@ export function CompensationPage() {
               />
             </div>
             <Button onClick={handleWithdraw} disabled={withdrawing || !withdrawAmount} variant="success" className="w-full">
-              {withdrawing ? "Requesting..." : `Withdraw ${tokenSymbol}`}
+              {withdrawing ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Requesting</> : `Withdraw ${tokenSymbol}`}
             </Button>
             <p className="text-xs text-gray-600">
               Balance is verified on-chain. If sufficient, tokens are transferred to your wallet after Gateway confirmation.
