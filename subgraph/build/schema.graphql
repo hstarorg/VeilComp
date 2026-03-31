@@ -1,0 +1,73 @@
+"""
+VeilFactory deploys payroll instances. One entity per deployed contract.
+"""
+type Payroll @entity {
+  id: Bytes!                       # payroll contract address
+  employer: Bytes!
+  payToken: Bytes!
+  taxDivisor: Int!
+  employees: [Employee!]! @derivedFrom(field: "payroll")
+  runs: [PayrollRun!]! @derivedFrom(field: "payroll")
+  deposits: [Deposit!]! @derivedFrom(field: "payroll")
+  poolDeposited: BigInt!           # cumulative deposited amount
+  createdAt: BigInt!
+  createdTx: Bytes!
+}
+
+type Employee @entity {
+  "payrollAddress-employeeAddress"
+  id: String!
+  payroll: Payroll!
+  address: Bytes!
+  active: Boolean!
+  addedAt: BigInt!
+  removedAt: BigInt
+}
+
+type PayrollRun @entity {
+  "payrollAddress-runId"
+  id: String!
+  payroll: Payroll!
+  runId: BigInt!
+  employeeCount: Int!
+  status: PayrollRunStatus!
+  createdAt: BigInt!
+  executedAt: BigInt
+  createdTx: Bytes!
+  executedTx: Bytes
+}
+
+enum PayrollRunStatus {
+  Created
+  Executed
+}
+
+type Deposit @entity {
+  "txHash-logIndex"
+  id: String!
+  payroll: Payroll!
+  employer: Bytes!
+  amount: BigInt!
+  timestamp: BigInt!
+  tx: Bytes!
+}
+
+type Withdrawal @entity {
+  "payrollAddress-withdrawId"
+  id: String!
+  payroll: Payroll!
+  withdrawId: BigInt!
+  user: Bytes!
+  amount: BigInt!
+  status: WithdrawStatus!
+  requestedAt: BigInt!
+  completedAt: BigInt
+  requestTx: Bytes!
+  completeTx: Bytes
+}
+
+enum WithdrawStatus {
+  Pending
+  Completed
+  Failed
+}

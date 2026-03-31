@@ -12,11 +12,10 @@ describe("VeilPayroll", function () {
   let employer: HardhatEthersSigner;
   let emp1: HardhatEthersSigner;
   let emp2: HardhatEthersSigner;
-  let auditor: HardhatEthersSigner;
   let outsider: HardhatEthersSigner;
 
   before(async function () {
-    [employer, emp1, emp2, auditor, outsider] = await hre.ethers.getSigners();
+    [employer, emp1, emp2, , outsider] = await hre.ethers.getSigners();
 
     // Deploy mock USDT
     const MockERC20 = await hre.ethers.getContractFactory("MockUSDT");
@@ -78,7 +77,6 @@ describe("VeilPayroll", function () {
     });
 
     it("employee registered in factory reverse index", async function () {
-      // getMyPayrolls reads msg.sender — need to impersonate via staticCall
       const factoryAsEmp1 = factory.connect(emp1) as any;
       const payrolls = await factoryAsEmp1.getMyPayrolls.staticCall({ from: emp1.address });
       expect(payrolls.length).to.equal(1);
@@ -143,17 +141,54 @@ describe("VeilPayroll", function () {
     });
   });
 
-  // ── Payroll execution ──
+  // ── Payroll runs (monthly lifecycle) ──
 
-  describe("Payroll execution", function () {
-    it("employer can run payroll", async function () {
-      const tx = await payroll.runPayroll();
+  describe("Payroll runs", function () {
+    it("employer can create a payroll run with selected employees", async function () {
+      const tx = await payroll.createPayrollRun([emp1.address, emp2.address]);
       await tx.wait();
-      expect(await payroll.lastPayrollTimestamp()).to.be.greaterThan(0);
+
+      const run = await payroll.getPayrollRun(0);
+      expect(run.employeeCount).to.equal(2);
+      expect(run.status).to.equal(0); // Created
+      expect(run.createdAt).to.be.greaterThan(0);
+      expect(run.executedAt).to.equal(0);
+    });
+
+    it("run employee snapshot is stored", async function () {
+      const employees = await payroll.getRunEmployees(0);
+      expect(employees.length).to.equal(2);
+      expect(employees[0]).to.equal(emp1.address);
+      expect(employees[1]).to.equal(emp2.address);
+    });
+
+    it("cannot create run with non-employees", async function () {
+      await expect(
+        payroll.createPayrollRun([emp1.address, outsider.address])
+      ).to.be.revertedWithCustomError(payroll, "NotEmployee");
+    });
+
+    it("cannot create empty run", async function () {
+      await expect(
+        payroll.createPayrollRun([])
+      ).to.be.revertedWithCustomError(payroll, "NoEmployees");
+    });
+
+    it("employer can execute payroll run via batch", async function () {
+      const tx = await payroll.executePayrollRunBatch(0, 0, 2);
+      await tx.wait();
+
+      const run = await payroll.getPayrollRun(0);
+      expect(run.status).to.equal(1); // Executed
+      expect(run.executedAt).to.be.greaterThan(0);
+    });
+
+    it("cannot execute same run twice", async function () {
+      await expect(payroll.executePayrollRunBatch(0, 0, 2)).to.be.revertedWithCustomError(payroll, "RunAlreadyExecuted");
     });
 
     it("payroll total is correct", async function () {
-      const encTotal = await payroll.connect(employer).getLastPayrollTotal();
+      const encTotal = await payroll.connect(employer).getRunTotalPaid(0);
       const total = await hre.fhevm.userDecryptEuint(
         FhevmType.euint64, encTotal, payrollAddr, employer as unknown as ethers.Signer
       );
@@ -161,7 +196,7 @@ describe("VeilPayroll", function () {
       expect(total).to.equal(10_400_000000n);
     });
 
-    it("employee balances credited after payroll", async function () {
+    it("employee balances credited after payroll run", async function () {
       const encBal1 = await payroll.connect(emp1).getMyBalance();
       const bal1 = await hre.fhevm.userDecryptEuint(
         FhevmType.euint64, encBal1, payrollAddr, emp1 as unknown as ethers.Signer
@@ -175,20 +210,31 @@ describe("VeilPayroll", function () {
       expect(bal2).to.equal(6400_000000n);
     });
 
-    it("cannot run payroll twice within cooldown", async function () {
-      await expect(payroll.runPayroll()).to.be.revertedWithCustomError(payroll, "PayrollTooSoon");
+    it("can create and execute a second run (balances accumulate)", async function () {
+      // Create run with only emp1
+      const tx1 = await payroll.createPayrollRun([emp1.address]);
+      await tx1.wait();
+      expect(await payroll.getRunCount()).to.equal(2);
+
+      const tx2 = await payroll.executePayrollRunBatch(1, 0, 1);
+      await tx2.wait();
+
+      // emp1 balance: 4000 + 4000 = 8000
+      const encBal = await payroll.connect(emp1).getMyBalance();
+      const bal = await hre.fhevm.userDecryptEuint(
+        FhevmType.euint64, encBal, payrollAddr, emp1 as unknown as ethers.Signer
+      );
+      expect(bal).to.equal(8000_000000n);
     });
 
-    it("can run payroll again after cooldown", async function () {
-      await hre.ethers.provider.send("evm_increaseTime", [86400]);
-      await hre.ethers.provider.send("evm_mine", []);
-      const tx = await payroll.runPayroll();
-      await tx.wait();
-      expect(await payroll.payrollNonce()).to.equal(2);
-    });
+    it("non-employer cannot create or execute runs", async function () {
+      await expect(
+        payroll.connect(outsider).createPayrollRun([emp1.address])
+      ).to.be.revertedWithCustomError(payroll, "OnlyEmployer");
 
-    it("non-employer cannot run payroll", async function () {
-      await expect(payroll.connect(outsider).runPayroll()).to.be.revertedWithCustomError(payroll, "OnlyEmployer");
+      await expect(
+        payroll.connect(outsider).executePayrollRunBatch(0, 0, 1)
+      ).to.be.revertedWithCustomError(payroll, "OnlyEmployer");
     });
   });
 
@@ -208,30 +254,4 @@ describe("VeilPayroll", function () {
     });
   });
 
-  // ── Audit ACL ──
-
-  describe("Audit ACL", function () {
-    it("employer can grant auditor access", async function () {
-      await (await payroll.grantAuditorAccess(auditor.address)).wait();
-      expect(await payroll.isAuditor(auditor.address)).to.be.true;
-    });
-
-    it("auditor can view aggregate total", async function () {
-      const encTotal = await payroll.connect(auditor).getAggregatePayroll();
-      const total = await hre.fhevm.userDecryptEuint(
-        FhevmType.euint64, encTotal, payrollAddr, auditor as unknown as ethers.Signer
-      );
-      // Second payroll run: same salaries, same total
-      expect(total).to.equal(10_400_000000n);
-    });
-
-    it("non-auditor cannot view aggregate", async function () {
-      await expect(payroll.connect(outsider).getAggregatePayroll()).to.be.revertedWithCustomError(payroll, "NotAuditor");
-    });
-
-    it("employer can revoke auditor", async function () {
-      await (await payroll.revokeAuditorAccess(auditor.address)).wait();
-      expect(await payroll.isAuditor(auditor.address)).to.be.false;
-    });
-  });
 });

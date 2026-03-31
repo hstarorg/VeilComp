@@ -1,2 +1,5 @@
+packages:
+  - frontend
+  - subgraph
 ignoredBuiltDependencies:
   - secp256k1
