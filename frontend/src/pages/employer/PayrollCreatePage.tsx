@@ -4,8 +4,8 @@ import type { Address } from "viem";
 import { ListChecks, Loader2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PAYROLL_ABI } from "@/utils/contracts";
 import { useApp } from "@/contexts/AppContext";
+import { getEmployeeList, createPayrollRun } from "@/services/payroll";
 import toast from "react-hot-toast";
 
 export function PayrollCreatePage() {
@@ -18,56 +18,33 @@ export function PayrollCreatePage() {
   const [creating, setCreating] = useState(false);
 
   useEffect(() => {
-    if (!publicClient || !payrollAddr) return;
-    async function load() {
-      const list = await publicClient!.readContract({
-        address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getEmployeeList", account: address,
-      }) as Address[];
+    if (!publicClient || !payrollAddr || !address) return;
+    getEmployeeList(publicClient, payrollAddr as Address, address).then((list) => {
       setEmployees(list);
-      setSelected(new Set(list)); // default: all selected
-    }
-    load();
-  }, [publicClient, payrollAddr]);
+      setSelected(new Set(list));
+    });
+  }, [publicClient, payrollAddr, address]);
 
   function toggleEmployee(addr: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(addr)) next.delete(addr); else next.add(addr);
-      return next;
-    });
+    setSelected((prev) => { const next = new Set(prev); next.has(addr) ? next.delete(addr) : next.add(addr); return next; });
   }
 
   function toggleAll() {
-    if (selected.size === employees.length) setSelected(new Set());
-    else setSelected(new Set(employees));
+    setSelected(selected.size === employees.length ? new Set() : new Set(employees));
   }
 
   const selectedList = employees.filter((e) => selected.has(e));
 
   async function handleCreate() {
-    if (!walletClient || !publicClient || !address || !payrollAddr || selectedList.length === 0) return;
+    if (!walletClient || !publicClient || !payrollAddr || selectedList.length === 0) return;
     setCreating(true);
     try {
-      // Read current run count to determine the new runId
-      const count = await publicClient.readContract({
-        address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getRunCount",
-      }) as bigint;
-
       toast("Confirming employee selection...");
-      const hash = await walletClient.writeContract({
-        address: payrollAddr as Address,
-        abi: PAYROLL_ABI,
-        functionName: "createPayrollRun",
-        args: [selectedList],
-        account: address as Address,
-        chain: walletClient.chain,
-      });
-      await publicClient.waitForTransactionReceipt({ hash });
-
-      toast.success(`Pay run #${count} created. Now deposit funds to continue.`);
-      navigate(`/employer/${payrollAddr}/payroll/${count}`);
-    } catch (err: any) {
-      toast.error(err.shortMessage || err.message || "Failed to create pay run");
+      const runId = await createPayrollRun(walletClient, publicClient, payrollAddr as Address, selectedList);
+      toast.success(`Pay run #${runId} created. Now deposit funds to continue.`);
+      navigate(`/employer/${payrollAddr}/payroll/${runId}`);
+    } catch (err: unknown) {
+      toast.error((err as { shortMessage?: string }).shortMessage || (err as Error).message || "Failed to create pay run");
       setCreating(false);
     }
   }
@@ -92,13 +69,7 @@ export function PayrollCreatePage() {
             <div className="space-y-1 max-h-64 overflow-y-auto">
               {employees.map((emp) => (
                 <label key={emp} className="flex items-center gap-3 rounded-md px-3 py-2 hover:bg-gray-800/50 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(emp)}
-                    onChange={() => toggleEmployee(emp)}
-                    className="rounded border-gray-600"
-                    disabled={creating}
-                  />
+                  <input type="checkbox" checked={selected.has(emp)} onChange={() => toggleEmployee(emp)} className="rounded border-gray-600" disabled={creating} />
                   <span className="font-mono text-sm text-gray-300">{emp}</span>
                 </label>
               ))}
@@ -107,14 +78,8 @@ export function PayrollCreatePage() {
         </CardContent>
       </Card>
 
-      <Button
-        onClick={handleCreate}
-        disabled={creating || selectedList.length === 0}
-        className="w-full max-w-md"
-      >
-        {creating
-          ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Confirming...</>
-          : `Confirm ${selectedList.length} Employees`}
+      <Button onClick={handleCreate} disabled={creating || selectedList.length === 0} className="w-full max-w-md">
+        {creating ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Confirming...</> : `Confirm ${selectedList.length} Employees`}
       </Button>
     </div>
   );

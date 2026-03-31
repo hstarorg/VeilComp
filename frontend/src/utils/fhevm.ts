@@ -52,7 +52,7 @@ async function loadWasm() {
   }
 
   console.log('[fhevm] initSDK...');
-  await sdk.initSDK({ thread: 0 });
+  await sdk.initSDK({ thread: 4 });
   wasmLoaded = true;
   console.log('[fhevm] WASM loaded');
 }
