@@ -344,6 +344,11 @@ contract VeilPayroll is ZamaEthereumConfig {
         }
     }
 
+    /// @notice Returns the encrypted deducted handle for a withdraw request (for public decrypt).
+    function getWithdrawDeducted(uint256 id) external view returns (euint64) {
+        return _withdrawDeducted[id];
+    }
+
     // ════════════════════════════════════════════════════
     //  Internal
     // ════════════════════════════════════════════════════

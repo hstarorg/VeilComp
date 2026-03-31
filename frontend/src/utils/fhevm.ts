@@ -203,3 +203,35 @@ export async function decryptUint64(
 
   return BigInt(clearValue);
 }
+
+// ─── Public Decrypt (for fulfillWithdraw) ──────────────────
+
+export interface PublicDecryptProof {
+  abiEncodedCleartexts: `0x${string}`;
+  decryptionProof: `0x${string}`;
+}
+
+/**
+ * Public decrypt handles that were marked with makePubliclyDecryptable.
+ * Returns the proof needed for contract's checkSignatures / fulfillWithdraw.
+ * Polls the relayer until decryption is ready.
+ */
+export async function publicDecryptWithProof(
+  handles: string[],
+  walletClient: WalletClient,
+  chainId?: number,
+): Promise<PublicDecryptProof> {
+  assertSepolia(chainId);
+  await ensureReady(walletClient);
+
+  const result = await withTimeout(
+    instance.publicDecrypt(handles),
+    120_000,
+    'publicDecrypt',
+  );
+
+  return {
+    abiEncodedCleartexts: result.abiEncodedClearValues,
+    decryptionProof: result.decryptionProof,
+  };
+}

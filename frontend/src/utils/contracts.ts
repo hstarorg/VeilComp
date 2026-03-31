@@ -49,6 +49,10 @@ export const PAYROLL_ABI = [
   { type: "function", name: "getRunCount", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
   // Withdraw
   { type: "function", name: "requestWithdraw", inputs: [{ name: "amount", type: "uint256" }], outputs: [{ name: "id", type: "uint256" }], stateMutability: "nonpayable" },
+  { type: "function", name: "fulfillWithdraw", inputs: [{ name: "id", type: "uint256" }, { name: "handlesList", type: "bytes32[]" }, { name: "abiEncodedCleartexts", type: "bytes" }, { name: "decryptionProof", type: "bytes" }], outputs: [], stateMutability: "nonpayable" },
+  { type: "function", name: "nextWithdrawId", inputs: [], outputs: [{ type: "uint256" }], stateMutability: "view" },
+  { type: "function", name: "withdrawRequests", inputs: [{ name: "id", type: "uint256" }], outputs: [{ name: "user", type: "address" }, { name: "amount", type: "uint256" }, { name: "pending", type: "bool" }], stateMutability: "view" },
+  { type: "function", name: "getWithdrawDeducted", inputs: [{ name: "id", type: "uint256" }], outputs: [{ type: "bytes32" }], stateMutability: "view" },
   // Events
   { type: "event", name: "PayrollRunCreated", inputs: [{ name: "runId", type: "uint256", indexed: true }, { name: "employeeCount", type: "uint256", indexed: false }] },
   { type: "event", name: "PayrollRunExecuted", inputs: [{ name: "runId", type: "uint256", indexed: true }, { name: "employeeCount", type: "uint256", indexed: false }, { name: "timestamp", type: "uint256", indexed: false }] },

@@ -8,12 +8,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EncryptedValue } from "@/components/common/EncryptedValue";
 import { PAYROLL_ABI, ERC20_ABI } from "@/utils/contracts";
+import { publicDecryptWithProof } from "@/utils/fhevm";
 import { useApp } from "@/contexts/AppContext";
 import toast from "react-hot-toast";
 
 export function CompensationPage() {
   const { address: payrollAddr } = useParams<{ address: string }>();
-  const { publicClient, walletClient, address, onDecrypt } = useApp();
+  const { publicClient, walletClient, address, chainId, onDecrypt } = useApp();
 
   const [employerAddr, setEmployerAddr] = useState("");
   const [tokenSymbol, setTokenSymbol] = useState("ERC20");
@@ -24,7 +25,7 @@ export function CompensationPage() {
 
   // Withdraw
   const [withdrawAmount, setWithdrawAmount] = useState("");
-  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawStep, setWithdrawStep] = useState<"idle" | "requesting" | "decrypting" | "fulfilling">("idle");
 
   useEffect(() => {
     if (!publicClient || !address || !payrollAddr) return;
@@ -59,31 +60,59 @@ export function CompensationPage() {
 
   async function handleWithdraw() {
     if (!walletClient || !publicClient || !address || !payrollAddr || !withdrawAmount) return;
-    setWithdrawing(true);
     try {
       const amount = BigInt(Math.round(parseFloat(withdrawAmount) * 10 ** tokenDecimals));
 
-      const hash = await walletClient.writeContract({
-        address: payrollAddr as Address,
-        abi: PAYROLL_ABI,
-        functionName: "requestWithdraw",
-        args: [amount],
-        account: address as Address,
-        chain: walletClient.chain,
+      // Step 1: Request withdraw (creates encrypted deducted handle)
+      setWithdrawStep("requesting");
+      toast("Submitting withdraw request...");
+      const reqHash = await walletClient.writeContract({
+        address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "requestWithdraw",
+        args: [amount], account: address as Address, chain: walletClient.chain,
       });
-      await publicClient.waitForTransactionReceipt({ hash });
-      toast.success(`Withdraw requested for ${withdrawAmount} ${tokenSymbol}. Awaiting relayer confirmation.`);
+      await publicClient.waitForTransactionReceipt({ hash: reqHash });
+
+      // Get withdraw ID from nextWithdrawId - 1 (just incremented)
+      const nextId = await publicClient.readContract({
+        address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "nextWithdrawId",
+      }) as bigint;
+      const withdrawId = nextId - 1n;
+
+      // Get the encrypted handle for publicDecrypt
+      const handle = await publicClient.readContract({
+        address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getWithdrawDeducted",
+        args: [withdrawId],
+      }) as `0x${string}`;
+
+      // Step 2: Public decrypt via relayer (polls until ready)
+      setWithdrawStep("decrypting");
+      toast("Waiting for decryption...");
+      const proof = await publicDecryptWithProof([handle], walletClient, chainId);
+
+      // Step 3: Fulfill withdraw with proof
+      setWithdrawStep("fulfilling");
+      toast("Completing withdrawal...");
+      const fulfillHash = await walletClient.writeContract({
+        address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "fulfillWithdraw",
+        args: [withdrawId, [handle], proof.abiEncodedCleartexts, proof.decryptionProof],
+        account: address as Address, chain: walletClient.chain,
+      });
+      await publicClient.waitForTransactionReceipt({ hash: fulfillHash });
+
+      toast.success(`${withdrawAmount} ${tokenSymbol} withdrawn to your wallet!`);
       setWithdrawAmount("");
 
       // Refresh balance
       const balance = await publicClient.readContract({
+        blockTag: "latest",
         address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getMyBalance", account: address as Address,
       });
       setBalanceHandle(balance as string);
     } catch (err: any) {
+      console.error("[withdraw]", err);
       toast.error(err.shortMessage || err.message || "Withdraw failed");
     } finally {
-      setWithdrawing(false);
+      setWithdrawStep("idle");
     }
   }
 
@@ -149,11 +178,21 @@ export function CompensationPage() {
                 placeholder="0.00"
               />
             </div>
-            <Button onClick={handleWithdraw} disabled={withdrawing || !withdrawAmount} variant="success" className="w-full">
-              {withdrawing ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Requesting</> : `Withdraw ${tokenSymbol}`}
+            <Button onClick={handleWithdraw} disabled={withdrawStep !== "idle" || !withdrawAmount} variant="success" className="w-full">
+              {withdrawStep === "requesting" ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Requesting</>
+                : withdrawStep === "decrypting" ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Decrypting</>
+                : withdrawStep === "fulfilling" ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Transferring</>
+                : `Withdraw ${tokenSymbol}`}
             </Button>
+            {withdrawStep !== "idle" && (
+              <p className="text-xs text-indigo-400">
+                {withdrawStep === "requesting" && "Submitting request to contract..."}
+                {withdrawStep === "decrypting" && "Waiting for relayer to decrypt balance check..."}
+                {withdrawStep === "fulfilling" && "Verifying and transferring tokens..."}
+              </p>
+            )}
             <p className="text-xs text-gray-600">
-              Balance is verified on-chain. If sufficient, tokens are transferred to your wallet after Gateway confirmation.
+              Three-step process: request → decrypt verification → transfer tokens.
             </p>
           </CardContent>
         </Card>
