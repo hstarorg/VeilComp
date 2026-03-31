@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { wagmiConfig } from "@/config/wagmi";
 import { AppProvider } from "@/contexts/AppContext";
 import { router } from "@/router";
+import { Analytics } from "@vercel/analytics/react";
 
 import "@rainbow-me/rainbowkit/styles.css";
 
@@ -24,6 +25,7 @@ function App() {
               }}
             />
             <RouterProvider router={router} />
+            <Analytics />
           </AppProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
