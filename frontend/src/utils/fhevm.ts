@@ -1,32 +1,146 @@
-import {
-  createInstance,
-  SepoliaConfig,
-  type FhevmInstance,
-  type HandleContractPair,
-} from "@zama-fhe/relayer-sdk/web";
-import { BrowserProvider } from "ethers";
+import type { Address, WalletClient } from 'viem';
+import type { FhevmInstance, KmsUserDecryptEIP712Type } from '@zama-fhe/relayer-sdk/bundle';
 
-// ─── Singleton Instance ────────────────────────────────────
+const FHEVM_CHAIN_ID = 11155111;
 
-let instance: FhevmInstance | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getSdk(): any {
+  const sdk = (globalThis as any).relayerSDK ?? (window as any).relayerSDK;
+  if (!sdk) throw new Error('Zama SDK not loaded. Ensure relayer-sdk-js.umd.cjs is in index.html.');
+  return sdk;
+}
 
-/**
- * Initialize or return the cached FhevmInstance.
- * Must be called after wallet is connected (needs window.ethereum as the network provider).
- */
-export async function getFhevmInstance(): Promise<FhevmInstance> {
-  if (instance) return instance;
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
+}
 
-  if (!window.ethereum) {
-    throw new Error("MetaMask not found");
+// ─── State ─────────────────────────────────────────────────
+
+let instance: FhevmInstance;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let keypair: any = null;
+let wasmPromise: Promise<void> | null = null;
+let wasmLoaded = false;
+let boundWallet: string | null = null;
+
+// ─── Init ──────────────────────────────────────────────────
+
+async function loadWasm() {
+  if (wasmLoaded) return;
+  const sdk = getSdk();
+
+  console.log('[fhevm] crossOriginIsolated:', globalThis.crossOriginIsolated);
+  console.log('[fhevm] SharedArrayBuffer:', typeof SharedArrayBuffer !== 'undefined');
+
+  // Verify WASM files are reachable
+  for (const f of ['/tfhe_bg.wasm', '/kms_lib_bg.wasm']) {
+    const res = await fetch(f, { method: 'HEAD' });
+    console.log(`[fhevm] ${f}: ${res.status}`);
+    if (!res.ok) throw new Error(`Failed to fetch ${f}: ${res.status}`);
   }
 
-  instance = await createInstance({
-    ...SepoliaConfig,
-    network: window.ethereum,
-  });
+  console.log('[fhevm] initSDK...');
+  await sdk.initSDK({ thread: 0 });
+  wasmLoaded = true;
+  console.log('[fhevm] WASM loaded');
+}
 
-  return instance;
+async function bindWallet(walletClient: WalletClient) {
+  const addr = walletClient.account?.address ?? '';
+  if (instance && boundWallet === addr) return;
+
+  const sdk = getSdk();
+  console.log('[fhevm] createInstance for', addr.slice(0, 8), '...');
+  instance = await withTimeout(
+    sdk.createInstance({ ...sdk.SepoliaConfigV2, network: walletClient }),
+    30_000,
+    'createInstance',
+  );
+  keypair = instance.generateKeypair();
+  boundWallet = addr;
+  console.log('[fhevm] instance ready for', addr.slice(0, 8));
+}
+
+/**
+ * Ensure WASM is loaded and instance is bound to the current wallet.
+ * Safe to call repeatedly — only does work when needed.
+ */
+export async function ensureReady(walletClient: WalletClient) {
+  if (!wasmPromise) {
+    wasmPromise = loadWasm().catch((err) => {
+      console.error('[fhevm] WASM load failed:', err);
+      wasmPromise = null;
+      throw err;
+    });
+  }
+  await wasmPromise;
+  if (!wasmLoaded) throw new Error('fhEVM SDK initialization failed');
+  await bindWallet(walletClient);
+}
+
+/**
+ * Start WASM loading in background. Call early (e.g. on page load) to reduce latency.
+ * Does NOT require a wallet — just preloads the heavy WASM modules.
+ */
+export function preloadFhevm() {
+  if (wasmPromise || wasmLoaded) return;
+  wasmPromise = loadWasm().catch((err) => {
+    console.warn('[fhevm] preload failed:', err.message);
+    wasmPromise = null;
+  });
+}
+
+/**
+ * Sign EIP-712 typed data from the Zama SDK.
+ * Bridges SDK types → viem signTypedData types:
+ *  - Strips `EIP712Domain` from types (viem derives it from domain)
+ *  - Converts message `string` fields to `bigint` for uint256 compatibility
+ */
+async function requestSignature(
+  walletClient: WalletClient,
+  userAddress: Address,
+  eip712: KmsUserDecryptEIP712Type,
+): Promise<string> {
+  const { EIP712Domain: _, ...typesWithoutDomain } = eip712.types;
+  // SDK encodes uint256 fields as string; viem expects bigint
+  const message = {
+    publicKey: eip712.message.publicKey,
+    contractAddresses: eip712.message.contractAddresses,
+    startTimestamp: BigInt(eip712.message.startTimestamp),
+    durationDays: BigInt(eip712.message.durationDays),
+    extraData: eip712.message.extraData,
+  };
+
+  return walletClient.signTypedData({
+    account: userAddress,
+    domain: {
+      name: eip712.domain.name,
+      version: eip712.domain.version,
+      chainId: eip712.domain.chainId,
+      verifyingContract: eip712.domain.verifyingContract,
+    },
+    types: typesWithoutDomain,
+    primaryType: eip712.primaryType,
+    message,
+  });
+}
+
+function assertSepolia(chainId: number | undefined) {
+  if (chainId !== FHEVM_CHAIN_ID) {
+    throw new Error(`FHE is only available on Ethereum Sepolia (chainId ${FHEVM_CHAIN_ID}). Current: ${chainId}.`);
+  }
 }
 
 // ─── Encrypt ────────────────────────────────────────────────
@@ -36,100 +150,55 @@ export interface EncryptedInput {
   inputProof: Uint8Array;
 }
 
-/**
- * Encrypt a uint64 value for a specific contract call.
- * @param contractAddress  Target contract (e.g., VeilPayroll or VeilToken).
- * @param userAddress      The caller's wallet address.
- * @param value            Plaintext value to encrypt (e.g., salary in 6-decimal USDT).
- */
 export async function encryptUint64(
   contractAddress: string,
   userAddress: string,
-  value: number | bigint
+  value: number | bigint,
+  walletClient: WalletClient,
+  chainId?: number,
 ): Promise<EncryptedInput> {
-  const fhevm = await getFhevmInstance();
-  const input = fhevm.createEncryptedInput(contractAddress, userAddress);
-  input.add64(value);
-  return input.encrypt();
+  assertSepolia(chainId);
+  await ensureReady(walletClient);
+
+  console.log('[fhevm] encrypting...');
+  const input = instance.createEncryptedInput(contractAddress, userAddress);
+  input.add64(Number(value));
+  return withTimeout(input.encrypt(), 30_000, 'encrypt');
 }
 
 // ─── Decrypt ────────────────────────────────────────────────
 
-/**
- * Decrypt an encrypted euint64 handle using user's ephemeral keypair + EIP-712 signature.
- *
- * Flow:
- * 1. Generate an ephemeral keypair
- * 2. Sign an EIP-712 message granting the relayer permission to decrypt
- * 3. Send to relayer → KMS decrypts → returns cleartext
- *
- * @param handle           The encrypted handle (bytes32) from the contract.
- * @param contractAddress  The contract that owns this handle.
- */
 export async function decryptUint64(
   handle: string,
-  contractAddress: string
+  contractAddress: string,
+  walletClient: WalletClient,
+  chainId?: number,
 ): Promise<bigint> {
-  const fhevm = await getFhevmInstance();
+  assertSepolia(chainId);
+  await ensureReady(walletClient);
 
-  if (!window.ethereum) throw new Error("MetaMask not found");
+  const userAddress = walletClient.account!.address;
+  const timestamp = Date.now();
+  const durationDays = 10;
 
-  const provider = new BrowserProvider(window.ethereum);
-  const signer = await provider.getSigner();
-  const userAddress = await signer.getAddress();
+  const eip712 = instance.createEIP712(keypair.publicKey, [contractAddress], timestamp, durationDays);
 
-  // 1. Generate ephemeral keypair
-  const { publicKey, privateKey } = fhevm.generateKeypair();
+  const signature = await requestSignature(walletClient, userAddress, eip712);
 
-  // 2. Create EIP-712 typed data for user decrypt permission
-  const now = Math.floor(Date.now() / 1000);
-  const durationDays = 1;
-
-  const eip712 = fhevm.createEIP712(
-    publicKey,
-    [contractAddress],
-    now,
-    durationDays
-  );
-
-  // 3. Sign with user's wallet
-  // ethers signTypedData expects mutable types — strip readonly and remove EIP712Domain
-  const { EIP712Domain: _, ...sigTypes } = eip712.types;
-  const mutableTypes: Record<string, Array<{ name: string; type: string }>> = {};
-  for (const [key, val] of Object.entries(sigTypes)) {
-    mutableTypes[key] = [...(val as readonly { name: string; type: string }[])];
-  }
-
-  const signature = await signer.signTypedData(
-    eip712.domain as Record<string, unknown>,
-    mutableTypes,
-    eip712.message
-  );
-
-  // 4. Request decryption from relayer
-  const handleContractPair: HandleContractPair = {
-    handle,
-    contractAddress,
-  };
-
-  const results = await fhevm.userDecrypt(
-    [handleContractPair],
-    privateKey,
-    publicKey,
+  const result = await instance.userDecrypt(
+    [{ handle, contractAddress }],
+    keypair.privateKey,
+    keypair.publicKey,
     signature,
     [contractAddress],
     userAddress,
-    now,
-    durationDays
+    timestamp,
+    durationDays,
   );
 
-  // Results is Record<handle, clearValue>
-  const handleHex = handle.toLowerCase() as `0x${string}`;
-  const clearValue = (results as Record<string, bigint | boolean | string>)[handleHex]
-    ?? (results as Record<string, bigint | boolean | string>)[handle];
-
+  const clearValue = result[handle as `0x${string}`];
   if (clearValue === undefined) {
-    throw new Error("Decryption returned no result for this handle");
+    throw new Error('Decryption returned no result for this handle');
   }
 
   return BigInt(clearValue);

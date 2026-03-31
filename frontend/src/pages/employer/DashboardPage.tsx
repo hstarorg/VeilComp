@@ -1,87 +1,180 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import type { PublicClient } from "viem";
-import { Users, Percent, Clock, DollarSign } from "lucide-react";
+import { useParams, Link } from "react-router-dom";
+import type { Address } from "viem";
+import { formatUnits } from "viem";
+import { Users, Percent, Hash, Coins, Plus, AlertTriangle, ArrowLeft } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { EncryptedValue } from "@/components/common/EncryptedValue";
-import { ADDRESSES, PAYROLL_ABI } from "@/utils/contracts";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { PAYROLL_ABI, ERC20_ABI } from "@/utils/contracts";
+import { useApp } from "@/contexts/AppContext";
+import toast from "react-hot-toast";
 
-interface Props {
-  publicClient: PublicClient | null;
-  onDecrypt: (handle: string, contractAddress?: string) => Promise<bigint>;
-}
+export function DashboardPage() {
+  const { address: payrollAddr } = useParams<{ address: string }>();
+  const { publicClient, walletClient, address } = useApp();
 
-export function DashboardPage({ publicClient, onDecrypt }: Props) {
   const [employeeCount, setEmployeeCount] = useState(0);
   const [taxDivisor, setTaxDivisor] = useState(0);
-  const [lastPayrollTs, setLastPayrollTs] = useState(0);
-  const [payrollTotalHandle, setPayrollTotalHandle] = useState("");
+  const [runCount, setRunCount] = useState(0);
+  const [poolBalance, setPoolBalance] = useState(0n);
+  const [tokenSymbol, setTokenSymbol] = useState("ERC20");
+  const [tokenAddr, setTokenAddr] = useState<Address>("0x");
+  const [tokenDecimals, setTokenDecimals] = useState(6);
 
-  useEffect(() => {
-    if (!publicClient) return;
-    async function load() {
-      const [count, divisor, ts, total] = await Promise.all([
-        publicClient!.readContract({ address: ADDRESSES.payroll, abi: PAYROLL_ABI, functionName: "getEmployeeCount" }),
-        publicClient!.readContract({ address: ADDRESSES.payroll, abi: PAYROLL_ABI, functionName: "taxDivisor" }),
-        publicClient!.readContract({ address: ADDRESSES.payroll, abi: PAYROLL_ABI, functionName: "lastPayrollTimestamp" }),
-        publicClient!.readContract({ address: ADDRESSES.payroll, abi: PAYROLL_ABI, functionName: "getLastPayrollTotal" }),
+  // Deposit form
+  const [depositAmount, setDepositAmount] = useState("");
+  const [depositing, setDepositing] = useState(false);
+
+  async function loadData() {
+    if (!publicClient || !payrollAddr) return;
+    const [count, divisor, runs, pool, token] = await Promise.all([
+      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getEmployeeCount" }),
+      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "taxDivisor" }),
+      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getRunCount" }),
+      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "getPoolBalance" }),
+      publicClient.readContract({ address: payrollAddr as Address, abi: PAYROLL_ABI, functionName: "payToken" }),
+    ]);
+    setEmployeeCount(Number(count));
+    setTaxDivisor(Number(divisor));
+    setRunCount(Number(runs));
+    setPoolBalance(pool as bigint);
+    setTokenAddr(token as Address);
+
+    try {
+      const [sym, dec] = await Promise.all([
+        publicClient.readContract({ address: token as Address, abi: ERC20_ABI, functionName: "symbol" }),
+        publicClient.readContract({ address: token as Address, abi: ERC20_ABI, functionName: "decimals" }),
       ]);
-      setEmployeeCount(Number(count));
-      setTaxDivisor(Number(divisor));
-      setLastPayrollTs(Number(ts));
-      setPayrollTotalHandle(total as string);
+      setTokenSymbol(sym as string);
+      setTokenDecimals(Number(dec));
+    } catch { /* fallback */ }
+  }
+
+  useEffect(() => { loadData(); }, [publicClient, payrollAddr]);
+
+  async function handleDeposit() {
+    if (!walletClient || !address || !payrollAddr || !depositAmount) return;
+    setDepositing(true);
+    try {
+      const amount = BigInt(Math.round(parseFloat(depositAmount) * 10 ** tokenDecimals));
+
+      toast("Approving token transfer...");
+      let hash = await walletClient.writeContract({
+        address: tokenAddr,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [payrollAddr as Address, amount],
+        account: address,
+        chain: walletClient.chain,
+      });
+      await publicClient!.waitForTransactionReceipt({ hash });
+
+      toast("Depositing...");
+      hash = await walletClient.writeContract({
+        address: payrollAddr as Address,
+        abi: PAYROLL_ABI,
+        functionName: "deposit",
+        args: [amount],
+        account: address,
+        chain: walletClient.chain,
+      });
+      await publicClient!.waitForTransactionReceipt({ hash });
+
+      toast.success(`Deposited ${depositAmount} ${tokenSymbol}!`);
+      setDepositAmount("");
+      loadData();
+    } catch (err: any) {
+      toast.error(err.shortMessage || err.message || "Deposit failed");
+    } finally {
+      setDepositing(false);
     }
-    load();
-  }, [publicClient]);
+  }
 
   const taxPercent = taxDivisor > 0 ? Math.round(100 / taxDivisor) : 0;
-  const lastPayrollDate = lastPayrollTs > 0 ? new Date(lastPayrollTs * 1000).toLocaleString() : "Never";
+  const poolDisplay = formatUnits(poolBalance, tokenDecimals);
+  const isLowBalance = poolBalance === 0n && employeeCount > 0;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Employer Dashboard</h1>
+      <div className="flex items-center gap-3">
+        <Link to="/employer"><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button></Link>
+        <h1 className="text-2xl font-bold">Payroll Dashboard</h1>
+        <Badge>{tokenSymbol}</Badge>
+      </div>
 
+      <p className="font-mono text-xs text-gray-500">{payrollAddr}</p>
+
+      {/* Stats */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Card>
+        <StatCard icon={<Users />} label="Employees" value={String(employeeCount)} />
+        <StatCard icon={<Percent />} label="Tax Rate" value={`${taxPercent}%`} />
+        <StatCard icon={<Hash />} label="Payroll Runs" value={String(runCount)} />
+        <Card className={isLowBalance ? "border-red-900/50" : ""}>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium text-gray-400">Employees</CardTitle>
-            <Users className="h-4 w-4 text-gray-500" />
-          </CardHeader>
-          <CardContent><p className="text-2xl font-bold">{employeeCount}</p></CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium text-gray-400">Tax Rate</CardTitle>
-            <Percent className="h-4 w-4 text-gray-500" />
-          </CardHeader>
-          <CardContent><p className="text-2xl font-bold">{taxPercent}%</p></CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium text-gray-400">Last Payroll</CardTitle>
-            <Clock className="h-4 w-4 text-gray-500" />
-          </CardHeader>
-          <CardContent><p className="text-sm font-medium">{lastPayrollDate}</p></CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium text-gray-400">Payroll Total</CardTitle>
-            <DollarSign className="h-4 w-4 text-gray-500" />
+            <CardTitle className="text-xs font-medium text-gray-400">Pool ({tokenSymbol})</CardTitle>
+            <Coins className="h-4 w-4 text-gray-500" />
           </CardHeader>
           <CardContent>
-            <EncryptedValue handle={payrollTotalHandle} contractAddress={ADDRESSES.payroll} onDecrypt={onDecrypt} />
+            <p className={`text-lg font-semibold ${isLowBalance ? "text-red-400" : ""}`}>{poolDisplay}</p>
           </CardContent>
         </Card>
       </div>
 
+      {/* Low balance warning */}
+      {isLowBalance && (
+        <Card className="border-red-900/50 bg-red-950/20">
+          <CardContent className="flex items-start gap-3 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
+            <p className="text-sm text-red-300">
+              Pool balance is empty. Deposit {tokenSymbol} before running payroll.
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Deposit */}
+      <Card className="max-w-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Plus className="h-5 w-5 text-green-400" /> Deposit {tokenSymbol}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex gap-2">
+            <Input
+              type="number"
+              step="0.01"
+              value={depositAmount}
+              onChange={(e) => setDepositAmount(e.target.value)}
+              placeholder={`Amount (${tokenSymbol})`}
+            />
+            <Button onClick={handleDeposit} disabled={depositing || !depositAmount} variant="success">
+              {depositing ? "..." : "Deposit"}
+            </Button>
+          </div>
+          <p className="text-xs text-gray-600">Approve + deposit in two transactions. Tokens are locked in the payroll contract.</p>
+        </CardContent>
+      </Card>
+
+      {/* Actions */}
       <div className="flex gap-3">
-        <Button asChild><Link to="/employer/employees">Manage Employees</Link></Button>
-        <Button variant="success" asChild><Link to="/employer/payroll">Run Payroll</Link></Button>
+        <Link to={`/employer/${payrollAddr}/employees`}><Button>Manage Employees</Button></Link>
+        <Link to={`/employer/${payrollAddr}/payroll`}><Button variant="success">Run Payroll</Button></Link>
       </div>
     </div>
+  );
+}
+
+function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-xs font-medium text-gray-400">{label}</CardTitle>
+        <span className="h-4 w-4 text-gray-500">{icon}</span>
+      </CardHeader>
+      <CardContent><p className="text-lg font-semibold">{value}</p></CardContent>
+    </Card>
   );
 }

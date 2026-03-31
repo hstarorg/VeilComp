@@ -1,6 +1,6 @@
-export type Role = "employer" | "employee" | "auditor" | "unknown";
-
-export interface ContractAddresses {
-  token: `0x${string}`;
-  payroll: `0x${string}`;
+export interface PayrollInfo {
+  address: `0x${string}`;
+  payToken: `0x${string}`;
+  employer: `0x${string}`;
+  tokenSymbol?: string;
 }
