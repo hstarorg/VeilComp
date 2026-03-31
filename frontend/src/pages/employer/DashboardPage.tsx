@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import type { Address } from "viem";
 import { Users, Hash, Coins, Plus, AlertTriangle, CalendarCheck, Loader2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useApp } from "@/contexts/AppContext";
@@ -48,84 +48,102 @@ export function DashboardPage() {
   const isLowBalance = poolBalance === 0n && employeeCount > 0;
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Overview</h1>
+    <div className="space-y-8">
+      <h1 className="text-2xl font-bold tracking-tight">Overview</h1>
 
-      <div className="grid grid-cols-3 gap-4">
-        <StatCard icon={<Users />} label="Employees" value={String(employeeCount)} />
-        <StatCard icon={<Hash />} label="Pay Runs" value={String(runCount)} />
-        <Card className={isLowBalance ? "border-red-900/50" : ""}>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-xs font-medium text-gray-400">Pool ({token.symbol})</CardTitle>
-            <Coins className="h-4 w-4 text-gray-500" />
-          </CardHeader>
-          <CardContent>
-            <p className={`text-lg font-semibold ${isLowBalance ? "text-red-400" : ""}`}>{poolDisplay}</p>
+      {/* KPI Stats */}
+      <div className="grid grid-cols-2 gap-4">
+        <Card className="group transition-colors duration-200 hover:border-indigo-800/50">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</span>
+              <Users className="h-4 w-4 text-indigo-400/60" />
+            </div>
+            <p className="text-3xl font-bold tabular-nums">{employeeCount}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="group transition-colors duration-200 hover:border-indigo-800/50">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pay Runs</span>
+              <Hash className="h-4 w-4 text-indigo-400/60" />
+            </div>
+            <p className="text-3xl font-bold tabular-nums">{runCount}</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card className="max-w-md">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Plus className="h-5 w-5 text-green-400" /> Deposit {token.symbol}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex gap-2">
-            <Input type="number" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder={`Amount (${token.symbol})`} />
-            <Button onClick={handleDeposit} disabled={depositing || !depositAmount} variant="success">
-              {depositing ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Depositing</> : "Deposit"}
-            </Button>
+      {/* Pool + Deposit in one row */}
+      <Card className={`transition-colors duration-200 ${isLowBalance ? "border-red-900/60" : "border-gray-800/60"}`}>
+        <CardContent className="flex items-center gap-6 p-5">
+          {/* Pool balance */}
+          <div className="shrink-0">
+            <div className="flex items-center gap-2 mb-2">
+              <Coins className="h-4 w-4 text-indigo-400/60" />
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pool ({token.symbol})</span>
+            </div>
+            <p className={`text-3xl font-bold tabular-nums ${isLowBalance ? "text-red-400" : ""}`}>{poolDisplay}</p>
           </div>
-          <p className="text-xs text-gray-600">Approve + deposit in two transactions.</p>
+
+          {/* Divider */}
+          <div className="h-12 w-px bg-gray-800" />
+
+          {/* Deposit form */}
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <Plus className="h-3.5 w-3.5 text-green-400" />
+              <span className="text-xs font-medium text-gray-500">Deposit {token.symbol}</span>
+            </div>
+            <div className="flex gap-2">
+              <Input type="number" step="0.01" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)} placeholder={`Amount`} className="bg-gray-900/50 border-gray-800 focus:border-indigo-600 transition-colors" />
+              <Button onClick={handleDeposit} disabled={depositing || !depositAmount} variant="success" className="min-w-25 transition-all duration-200">
+                {depositing ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Depositing</> : "Deposit"}
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
+      {/* Contextual prompts */}
       {isLowBalance && (
-        <Card className="border-red-900/50 bg-red-950/20">
+        <Card className="border-red-900/40 bg-red-950/10">
           <CardContent className="flex items-start gap-3 p-4">
-            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-400" />
-            <p className="text-sm text-red-300">Pool is empty. Deposit {token.symbol} before paying employees.</p>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-500/10">
+              <AlertTriangle className="h-4 w-4 text-red-400" />
+            </div>
+            <p className="text-sm text-red-300/90 leading-relaxed">Pool is empty. Deposit {token.symbol} before paying employees.</p>
           </CardContent>
         </Card>
       )}
 
       {employeeCount === 0 && (
-        <Card className="border-yellow-900/30 bg-yellow-950/10">
+        <Card className="border-yellow-900/30 bg-yellow-950/5">
           <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-start gap-3">
-              <Users className="mt-0.5 h-5 w-5 shrink-0 text-yellow-400" />
-              <p className="text-sm text-yellow-300">No employees yet. Add employees to get started.</p>
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-yellow-500/10">
+                <Users className="h-4 w-4 text-yellow-400" />
+              </div>
+              <p className="text-sm text-yellow-300/90">No employees yet. Add employees to get started.</p>
             </div>
-            <Link to={`/employer/${payrollAddr}/employees`}><Button size="sm">Add Employees</Button></Link>
+            <Link to={`/employer/${payrollAddr}/employees`}><Button size="sm" className="transition-all duration-200">Add Employees</Button></Link>
           </CardContent>
         </Card>
       )}
 
       {employeeCount > 0 && !isLowBalance && (
-        <Card className="border-gray-800">
+        <Card className="border-indigo-900/30 bg-indigo-950/5">
           <CardContent className="flex items-center justify-between p-4">
-            <div className="flex items-start gap-3">
-              <CalendarCheck className="mt-0.5 h-5 w-5 shrink-0 text-indigo-400" />
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500/10">
+                <CalendarCheck className="h-4 w-4 text-indigo-400" />
+              </div>
               <p className="text-sm text-gray-300">Ready to pay {employeeCount} employees.</p>
             </div>
-            <Link to={`/employer/${payrollAddr}/payroll/new`}><Button size="sm" variant="success">New Pay Run</Button></Link>
+            <Link to={`/employer/${payrollAddr}/payroll/new`}><Button size="sm" variant="success" className="transition-all duration-200">New Pay Run</Button></Link>
           </CardContent>
         </Card>
       )}
     </div>
-  );
-}
-
-function StatCard({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-xs font-medium text-gray-400">{label}</CardTitle>
-        <span className="h-4 w-4 text-gray-500">{icon}</span>
-      </CardHeader>
-      <CardContent><p className="text-lg font-semibold">{value}</p></CardContent>
-    </Card>
   );
 }

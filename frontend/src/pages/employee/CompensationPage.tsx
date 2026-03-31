@@ -39,7 +39,6 @@ export function CompensationPage() {
       setEmployerAddr(employer as string);
       setSalaryHandle(salary as string);
       setBalanceHandle(balance as string);
-
       const token = await getTokenInfo(publicClient, tokenAddr as Address);
       setTokenSymbol(token.symbol);
       setTokenDecimals(token.decimals);
@@ -75,69 +74,84 @@ export function CompensationPage() {
 
   if (loading) return <p className="text-gray-500">Loading...</p>;
 
+  const stepLabels = {
+    requesting: { text: "Requesting", hint: "Submitting request to contract..." },
+    decrypting: { text: "Decrypting", hint: "Waiting for relayer to verify balance..." },
+    fulfilling: { text: "Transferring", hint: "Verifying proof and transferring tokens..." },
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div className="flex items-center gap-3">
-        <Link to="/"><Button variant="ghost" size="sm"><ArrowLeft className="h-4 w-4" /></Button></Link>
-        <h1 className="text-2xl font-bold">Salary Details</h1>
+        <Link to="/"><Button variant="ghost" size="sm" className="transition-colors duration-200"><ArrowLeft className="h-4 w-4" /></Button></Link>
+        <h1 className="text-2xl font-bold tracking-tight">Salary Details</h1>
       </div>
 
       <div className="flex items-center gap-3 text-sm text-gray-400">
-        <Building2 className="h-4 w-4" />
-        <span className="font-mono">{employerAddr.slice(0, 8)}...{employerAddr.slice(-6)}</span>
-        <Badge>{tokenSymbol}</Badge>
+        <Building2 className="h-4 w-4 text-gray-600" />
+        <span className="font-mono text-gray-500">{employerAddr.slice(0, 8)}...{employerAddr.slice(-6)}</span>
+        <Badge className="bg-gray-800/60 text-gray-400 border-gray-700/50">{tokenSymbol}</Badge>
       </div>
 
       <div className="grid gap-6 sm:grid-cols-2 items-stretch">
+        {/* Left: Info cards */}
         <div className="flex flex-col gap-4">
-          <Card className="flex-1 flex flex-col">
+          <Card className="flex-1 flex flex-col transition-colors duration-200 hover:border-gray-700">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-400">Monthly Salary</CardTitle>
-              <DollarSign className="h-4 w-4 text-gray-500" />
+              <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wider">Monthly Salary</CardTitle>
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-500/10">
+                <DollarSign className="h-3.5 w-3.5 text-indigo-400" />
+              </div>
             </CardHeader>
             <CardContent className="flex-1 flex items-center text-xl">
               <EncryptedValue handle={salaryHandle} contractAddress={payrollAddr as string} onDecrypt={onDecrypt} />
             </CardContent>
           </Card>
 
-          <Card className="flex-1 flex flex-col">
+          <Card className="flex-1 flex flex-col transition-colors duration-200 hover:border-gray-700">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium text-gray-400">Withdrawable Balance</CardTitle>
-              <Wallet className="h-4 w-4 text-gray-500" />
+              <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wider">Withdrawable Balance</CardTitle>
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-green-500/10">
+                <Wallet className="h-3.5 w-3.5 text-green-400" />
+              </div>
             </CardHeader>
             <CardContent className="flex-1 flex flex-col justify-between text-xl">
               <EncryptedValue handle={balanceHandle} contractAddress={payrollAddr as string} onDecrypt={onDecrypt} />
-              <p className="text-xs text-gray-600 mt-4">All values are FHE-encrypted on chain. Only you can decrypt your own data.</p>
+              <p className="text-xs text-gray-600 mt-4">All values are FHE-encrypted. Only you can decrypt your data.</p>
             </CardContent>
           </Card>
         </div>
 
-        <Card>
+        {/* Right: Withdraw */}
+        <Card className="border-gray-800/60 transition-colors duration-200 hover:border-gray-700">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ArrowDownToLine className="h-5 w-5 text-green-400" /> Withdraw {tokenSymbol}
+            <CardTitle className="flex items-center gap-2 text-base font-medium">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-green-500/10">
+                <ArrowDownToLine className="h-4 w-4 text-green-400" />
+              </div>
+              Withdraw {tokenSymbol}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-gray-400">Enter the amount to withdraw to your wallet. The Gateway will verify your encrypted balance and transfer tokens automatically.</p>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              Enter the amount to withdraw. The Gateway verifies your encrypted balance and transfers tokens to your wallet.
+            </p>
             <div>
-              <label className="mb-1.5 block text-xs text-gray-500">Amount ({tokenSymbol})</label>
-              <Input type="number" step="0.01" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} placeholder="0.00" />
+              <label className="mb-1.5 block text-xs text-gray-500 font-medium">Amount ({tokenSymbol})</label>
+              <Input type="number" step="0.01" value={withdrawAmount} onChange={(e) => setWithdrawAmount(e.target.value)} placeholder="0.00" className="bg-gray-900/50 border-gray-800 focus:border-indigo-600 transition-colors" />
             </div>
-            <Button onClick={handleWithdraw} disabled={withdrawStep !== "idle" || !withdrawAmount} variant="success" className="w-full">
-              {withdrawStep === "requesting" ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Requesting</>
-                : withdrawStep === "decrypting" ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Decrypting</>
-                : withdrawStep === "fulfilling" ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> Transferring</>
+            <Button onClick={handleWithdraw} disabled={withdrawStep !== "idle" || !withdrawAmount} variant="success" className="w-full transition-all duration-200">
+              {withdrawStep !== "idle"
+                ? <><Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> {stepLabels[withdrawStep].text}</>
                 : `Withdraw ${tokenSymbol}`}
             </Button>
             {withdrawStep !== "idle" && (
-              <p className="text-xs text-indigo-400">
-                {withdrawStep === "requesting" && "Submitting request to contract..."}
-                {withdrawStep === "decrypting" && "Waiting for relayer to decrypt balance check..."}
-                {withdrawStep === "fulfilling" && "Verifying and transferring tokens..."}
-              </p>
+              <div className="flex items-center gap-2 rounded-lg bg-indigo-500/5 border border-indigo-500/10 px-3 py-2">
+                <div className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                <p className="text-xs text-indigo-400">{stepLabels[withdrawStep].hint}</p>
+              </div>
             )}
-            <p className="text-xs text-gray-600">Three-step process: request, decrypt verification, transfer tokens.</p>
+            <p className="text-[11px] text-gray-600">Three steps: request, decrypt verification, transfer.</p>
           </CardContent>
         </Card>
       </div>
