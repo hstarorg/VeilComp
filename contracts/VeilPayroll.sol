@@ -1,22 +1,38 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {FHE, euint64, externalEuint64, ebool} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
-import {VeilToken} from "./VeilToken.sol";
+
+interface IVeilFactory {
+    function registerEmployee(address employee) external;
+    function unregisterEmployee(address employee) external;
+}
 
 /**
  * @title  VeilPayroll
- * @notice All-in-one confidential payroll contract: employee registry, salary engine, and audit ACL.
- *         Merging avoids cross-contract FHE ACL headaches — salary handles stay internal.
+ * @notice All-in-one confidential payroll: employee registry, fund pool, payroll engine, audit ACL.
+ *         Each instance is bound to one ERC-20 token (e.g. USDT) and one employer.
+ *         Deployed via VeilFactory (create2).
+ *
+ *         Fund flow:
+ *           Deposit:  employer → approve token → deposit(amount) → tokens locked in contract
+ *           Payroll:  runPayroll() → internal FHE accounting (no external transfer)
+ *           Withdraw: employee → requestWithdraw(amount) → Relayer callback → tokens released
  */
 contract VeilPayroll is ZamaEthereumConfig {
+    using SafeERC20 for IERC20;
+
     // ──────────────────── State ────────────────────
     address public employer;
-    VeilToken public token;
+    IERC20 public immutable payToken;
+    IVeilFactory public immutable factory;
 
     // Employee registry
     mapping(address => euint64) internal salaries;
+    mapping(address => euint64) internal balances; // earned but not yet withdrawn
     mapping(address => bool) public isEmployee;
     address[] internal employeeList;
     mapping(address => uint256) internal employeeIndex;
@@ -25,8 +41,8 @@ contract VeilPayroll is ZamaEthereumConfig {
     uint64 public taxDivisor;
     euint64 internal lastPayrollTotal;
     uint256 public lastPayrollTimestamp;
-    uint256 public payrollNonce;           // Increments each full payroll cycle
-    uint256 public currentBatchNonce;      // Tracks which cycle batches belong to
+    uint256 public payrollNonce;
+    uint256 public currentBatchNonce;
     uint256 public constant MAX_BATCH_SIZE = 10;
     uint256 public constant MIN_PAYROLL_INTERVAL = 1 days;
 
@@ -35,6 +51,16 @@ contract VeilPayroll is ZamaEthereumConfig {
     address[] internal auditorList;
     mapping(address => uint256) internal auditorIndex;
 
+    // Withdraw
+    struct WithdrawRequest {
+        address user;
+        uint256 amount;
+        bool pending;
+    }
+    uint256 public nextWithdrawId;
+    mapping(uint256 => WithdrawRequest) public withdrawRequests;
+    mapping(uint256 => euint64) internal _withdrawDeducted;
+
     // ──────────────────── Errors ────────────────────
     error OnlyEmployer();
     error AlreadyEmployee();
@@ -42,13 +68,17 @@ contract VeilPayroll is ZamaEthereumConfig {
     error AlreadyAuditor();
     error NotAuditor();
     error ZeroAddress();
+    error ZeroAmount();
+    error AmountOverflow();
     error NoEmployees();
     error BatchTooLarge();
     error InvalidRange();
     error InvalidTaxDivisor();
     error PayrollTooSoon();
+    error WithdrawNotPending();
 
     // ──────────────────── Events ────────────────────
+    event Deposited(address indexed employer, uint256 amount);
     event EmployeeAdded(address indexed employee);
     event EmployeeRemoved(address indexed employee);
     event SalaryUpdated(address indexed employee);
@@ -57,6 +87,9 @@ contract VeilPayroll is ZamaEthereumConfig {
     event AuditorGranted(address indexed auditor);
     event AuditorRevoked(address indexed auditor);
     event PayrollMadePublic();
+    event WithdrawRequested(uint256 indexed id, address indexed user, uint256 amount);
+    event WithdrawCompleted(uint256 indexed id, address indexed user, uint256 amount);
+    event WithdrawFailed(uint256 indexed id, address indexed user);
 
     // ──────────────────── Modifiers ────────────────────
     modifier onlyEmployer() {
@@ -70,10 +103,31 @@ contract VeilPayroll is ZamaEthereumConfig {
     }
 
     // ──────────────────── Constructor ────────────────────
-    constructor(address _token) {
-        employer = msg.sender;
-        token = VeilToken(_token);
+    /// @param _payToken ERC-20 token for salary payments.
+    /// @param _factory  VeilFactory address (for employee reverse index).
+    /// @param _employer The company that owns this payroll. Passed by Factory since
+    ///                  create2 deployment makes msg.sender = factory, not employer.
+    constructor(address _payToken, address _factory, address _employer) {
+        employer = _employer;
+        payToken = IERC20(_payToken);
+        factory = IVeilFactory(_factory);
         taxDivisor = 5; // 20% tax
+    }
+
+    // ════════════════════════════════════════════════════
+    //  Fund management
+    // ════════════════════════════════════════════════════
+
+    /// @notice Employer deposits ERC-20 tokens into the payroll pool.
+    function deposit(uint256 amount) external onlyEmployer {
+        if (amount == 0) revert ZeroAmount();
+        payToken.safeTransferFrom(msg.sender, address(this), amount);
+        emit Deposited(msg.sender, amount);
+    }
+
+    /// @notice Pool balance (plaintext, public info for employer to check funding).
+    function getPoolBalance() external view returns (uint256) {
+        return payToken.balanceOf(address(this));
     }
 
     // ════════════════════════════════════════════════════
@@ -93,9 +147,17 @@ contract VeilPayroll is ZamaEthereumConfig {
         salaries[employee] = FHE.allowThis(salaries[employee]);
         salaries[employee] = FHE.allow(salaries[employee], employee);
 
+        // Init balance to 0
+        balances[employee] = FHE.asEuint64(0);
+        balances[employee] = FHE.allowThis(balances[employee]);
+        balances[employee] = FHE.allow(balances[employee], employee);
+
         employeeIndex[employee] = employeeList.length;
         employeeList.push(employee);
         isEmployee[employee] = true;
+
+        // Register in factory reverse index
+        factory.registerEmployee(employee);
 
         emit EmployeeAdded(employee);
     }
@@ -109,12 +171,12 @@ contract VeilPayroll is ZamaEthereumConfig {
         salaries[employee] = salary;
         salaries[employee] = FHE.allowThis(salaries[employee]);
         salaries[employee] = FHE.allow(salaries[employee], employee);
-
         emit SalaryUpdated(employee);
     }
 
     function removeEmployee(address employee) external onlyEmployer employeeExists(employee) {
         salaries[employee] = FHE.asEuint64(0);
+        // Note: balance is NOT zeroed — employee can still withdraw earned funds
         isEmployee[employee] = false;
 
         uint256 idx = employeeIndex[employee];
@@ -124,6 +186,8 @@ contract VeilPayroll is ZamaEthereumConfig {
         employeeList.pop();
         delete employeeIndex[employee];
 
+        factory.unregisterEmployee(employee);
+
         emit EmployeeRemoved(employee);
     }
 
@@ -131,6 +195,11 @@ contract VeilPayroll is ZamaEthereumConfig {
     function getMySalary() external view returns (euint64) {
         if (!isEmployee[msg.sender]) revert NotEmployee();
         return salaries[msg.sender];
+    }
+
+    /// @notice Employee views own encrypted withdrawable balance.
+    function getMyBalance() external view returns (euint64) {
+        return balances[msg.sender];
     }
 
     function getEmployeeCount() external view returns (uint256) {
@@ -145,10 +214,6 @@ contract VeilPayroll is ZamaEthereumConfig {
     //  Payroll execution
     // ════════════════════════════════════════════════════
 
-    /**
-     * @notice Run payroll for all employees (≤ MAX_BATCH_SIZE).
-     *         For each employee: netPay = salary - salary/taxDivisor.
-     */
     function runPayroll() external onlyEmployer {
         if (block.timestamp < lastPayrollTimestamp + MIN_PAYROLL_INTERVAL) revert PayrollTooSoon();
 
@@ -164,10 +229,6 @@ contract VeilPayroll is ZamaEthereumConfig {
         emit PayrollExecuted(count, block.timestamp);
     }
 
-    /**
-     * @notice Start a new batch payroll cycle. Must be called before runPayrollBatch.
-     *         Resets the accumulator and enforces the cooldown period.
-     */
     function startPayrollBatch() external onlyEmployer {
         if (block.timestamp < lastPayrollTimestamp + MIN_PAYROLL_INTERVAL) revert PayrollTooSoon();
         payrollNonce++;
@@ -175,12 +236,8 @@ contract VeilPayroll is ZamaEthereumConfig {
         lastPayrollTotal = FHE.asEuint64(0);
     }
 
-    /**
-     * @notice Run payroll for a slice [fromIndex, toIndex). Use for >10 employees.
-     *         Must call startPayrollBatch() first for each new pay period.
-     */
     function runPayrollBatch(uint256 fromIndex, uint256 toIndex) external onlyEmployer {
-        if (currentBatchNonce != payrollNonce) revert InvalidRange(); // must call startPayrollBatch first
+        if (currentBatchNonce != payrollNonce) revert InvalidRange();
         if (toIndex <= fromIndex) revert InvalidRange();
         if (toIndex - fromIndex > MAX_BATCH_SIZE) revert BatchTooLarge();
         if (toIndex > employeeList.length) revert InvalidRange();
@@ -198,35 +255,83 @@ contract VeilPayroll is ZamaEthereumConfig {
 
         for (uint256 i = from; i < to; i++) {
             address emp = employeeList[i];
-            euint64 salary = salaries[emp]; // No cross-contract ACL needed!
+            euint64 salary = salaries[emp];
 
             euint64 tax = FHE.div(salary, taxDivisor);
             ebool valid = FHE.le(tax, salary);
             euint64 netPay = FHE.sub(salary, tax);
             netPay = FHE.select(valid, netPay, FHE.asEuint64(0));
 
-            // Allow token contract to use this handle
-            netPay = FHE.allowThis(netPay);
-            netPay = FHE.allow(netPay, address(token));
+            // Credit to employee's internal balance (no external transfer)
+            balances[emp] = FHE.add(balances[emp], netPay);
+            balances[emp] = FHE.allowThis(balances[emp]);
+            balances[emp] = FHE.allow(balances[emp], emp);
 
-            token.encryptedTransferFrom(employer, emp, netPay);
             totalPaid = FHE.add(totalPaid, netPay);
         }
     }
 
-    /// @notice Returns the encrypted total of the last payroll run.
     function getLastPayrollTotal() external view returns (euint64) {
         return lastPayrollTotal;
     }
-
-    // ════════════════════════════════════════════════════
-    //  Tax configuration
-    // ════════════════════════════════════════════════════
 
     function setTaxRate(uint64 divisor) external onlyEmployer {
         if (divisor < 2 || divisor > 100) revert InvalidTaxDivisor();
         taxDivisor = divisor;
         emit TaxRateUpdated(divisor);
+    }
+
+    // ════════════════════════════════════════════════════
+    //  Employee withdrawal (async via Zama Gateway)
+    // ════════════════════════════════════════════════════
+
+    function requestWithdraw(uint256 amount) external returns (uint256 id) {
+        if (amount == 0) revert ZeroAmount();
+        if (amount > type(uint64).max) revert AmountOverflow();
+
+        id = nextWithdrawId++;
+
+        euint64 encAmount = FHE.asEuint64(uint64(amount));
+        ebool sufficient = FHE.le(encAmount, balances[msg.sender]);
+        euint64 deducted = FHE.select(sufficient, encAmount, FHE.asEuint64(0));
+
+        balances[msg.sender] = FHE.sub(balances[msg.sender], deducted);
+        balances[msg.sender] = FHE.allowThis(balances[msg.sender]);
+        balances[msg.sender] = FHE.allow(balances[msg.sender], msg.sender);
+
+        _withdrawDeducted[id] = deducted;
+        _withdrawDeducted[id] = FHE.allowThis(_withdrawDeducted[id]);
+        FHE.makePubliclyDecryptable(_withdrawDeducted[id]);
+
+        withdrawRequests[id] = WithdrawRequest({
+            user: msg.sender,
+            amount: amount,
+            pending: true
+        });
+
+        emit WithdrawRequested(id, msg.sender, amount);
+    }
+
+    function fulfillWithdraw(
+        uint256 id,
+        bytes32[] calldata handlesList,
+        bytes calldata abiEncodedCleartexts,
+        bytes calldata decryptionProof
+    ) external {
+        WithdrawRequest storage req = withdrawRequests[id];
+        if (!req.pending) revert WithdrawNotPending();
+
+        FHE.checkSignatures(handlesList, abiEncodedCleartexts, decryptionProof);
+
+        uint64 decryptedAmount = abi.decode(abiEncodedCleartexts, (uint64));
+        req.pending = false;
+
+        if (decryptedAmount == uint64(req.amount)) {
+            payToken.safeTransfer(req.user, req.amount);
+            emit WithdrawCompleted(id, req.user, req.amount);
+        } else {
+            emit WithdrawFailed(id, req.user);
+        }
     }
 
     // ════════════════════════════════════════════════════
@@ -240,8 +345,6 @@ contract VeilPayroll is ZamaEthereumConfig {
         isAuditor[auditor] = true;
         auditorIndex[auditor] = auditorList.length;
         auditorList.push(auditor);
-
-        // Grant FHE permission on the payroll total
         FHE.allow(lastPayrollTotal, auditor);
 
         emit AuditorGranted(auditor);
@@ -261,13 +364,11 @@ contract VeilPayroll is ZamaEthereumConfig {
         emit AuditorRevoked(auditor);
     }
 
-    /// @notice Auditor views encrypted aggregate payroll total.
     function getAggregatePayroll() external view returns (euint64) {
         if (!isAuditor[msg.sender]) revert NotAuditor();
         return lastPayrollTotal;
     }
 
-    /// @notice Make the payroll total publicly decryptable.
     function makePayrollPublic() external onlyEmployer {
         FHE.makePubliclyDecryptable(lastPayrollTotal);
         emit PayrollMadePublic();
@@ -284,7 +385,6 @@ contract VeilPayroll is ZamaEthereumConfig {
     function _allowPayrollTotal() internal {
         lastPayrollTotal = FHE.allowThis(lastPayrollTotal);
         lastPayrollTotal = FHE.allow(lastPayrollTotal, employer);
-        // Pre-allow all current auditors
         for (uint256 i = 0; i < auditorList.length; i++) {
             lastPayrollTotal = FHE.allow(lastPayrollTotal, auditorList[i]);
         }
