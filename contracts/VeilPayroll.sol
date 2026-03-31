@@ -13,14 +13,14 @@ interface IVeilFactory {
 
 /**
  * @title  VeilPayroll
- * @notice Confidential payroll with independent employee management and monthly payroll runs.
+ * @notice Confidential payroll with independent employee management and monthly pay runs.
  *         Each instance is bound to one ERC-20 token and one employer. Deployed via VeilFactory.
  *
  *         Monthly workflow:
  *           1. Manage employees (add/remove/update salary) — anytime
  *           2. createPayrollRun(employees[]) — snapshot selected employees
  *           3. deposit(amount) — ensure pool is funded
- *           4. executePayrollRun(runId) — irreversible salary distribution
+ *           4. executePayrollRunBatch(runId, from, to) — irreversible salary distribution
  */
 contract VeilPayroll is ZamaEthereumConfig {
     using SafeERC20 for IERC20;
@@ -34,7 +34,7 @@ contract VeilPayroll is ZamaEthereumConfig {
         PayrollStatus status;
         uint256 createdAt;
         uint256 executedAt;
-        uint256 batchProcessed; // tracks progress for batch execution
+        uint256 batchProcessed;
     }
 
     // ──────────────────── State ────────────────────
@@ -43,19 +43,18 @@ contract VeilPayroll is ZamaEthereumConfig {
     IERC20 public immutable payToken;
     IVeilFactory public immutable factory;
 
-    // Employee registry (independent management)
+    // Employee registry
     mapping(address => euint64) internal salaries;
-    mapping(address => euint64) internal balances; // earned but not yet withdrawn
+    mapping(address => euint64) internal balances;
     mapping(address => bool) public isEmployee;
     address[] internal employeeList;
     mapping(address => uint256) internal employeeIndex;
 
     // Payroll runs
-    uint64 public taxDivisor;
     uint256 public nextRunId;
     mapping(uint256 => PayrollRun) public payrollRuns;
-    mapping(uint256 => address[]) internal _runEmployees; // runId → snapshot
-    mapping(uint256 => euint64) internal _runTotalPaid;   // runId → encrypted total
+    mapping(uint256 => address[]) internal _runEmployees;
+    mapping(uint256 => euint64) internal _runTotalPaid;
 
     // Withdraw
     struct WithdrawRequest {
@@ -76,7 +75,6 @@ contract VeilPayroll is ZamaEthereumConfig {
     error AmountOverflow();
     error NoEmployees();
     error InvalidRange();
-    error InvalidTaxDivisor();
     error RunNotCreated();
     error RunAlreadyExecuted();
     error BatchOutOfOrder();
@@ -90,7 +88,6 @@ contract VeilPayroll is ZamaEthereumConfig {
     event PayrollRunCreated(uint256 indexed runId, uint256 employeeCount);
     event PayrollRunExecuted(uint256 indexed runId, uint256 employeeCount, uint256 timestamp);
     event PayrollBatchProcessed(uint256 indexed runId, uint256 fromIndex, uint256 toIndex);
-    event TaxRateUpdated(uint64 newDivisor);
     event WithdrawRequested(uint256 indexed id, address indexed user, uint256 amount);
     event WithdrawCompleted(uint256 indexed id, address indexed user, uint256 amount);
     event WithdrawFailed(uint256 indexed id, address indexed user);
@@ -111,7 +108,6 @@ contract VeilPayroll is ZamaEthereumConfig {
         employer = _employer;
         payToken = IERC20(_payToken);
         factory = IVeilFactory(_factory);
-        taxDivisor = 5; // 20% tax
     }
 
     // ════════════════════════════════════════════════════
@@ -204,26 +200,21 @@ contract VeilPayroll is ZamaEthereumConfig {
     }
 
     // ════════════════════════════════════════════════════
-    //  Payroll runs (monthly lifecycle)
+    //  Pay runs (monthly lifecycle)
     // ════════════════════════════════════════════════════
 
-    /// @notice Create a payroll run with selected employees (snapshot).
-    /// @param employees Array of employee addresses to include in this run.
     function createPayrollRun(address[] calldata employees) external onlyEmployer returns (uint256 runId) {
         uint256 count = employees.length;
         if (count == 0) revert NoEmployees();
 
-        // Validate all addresses are current employees
         for (uint256 i = 0; i < count; i++) {
             if (!isEmployee[employees[i]]) revert NotEmployee();
         }
 
         runId = nextRunId++;
 
-        // Snapshot employee list
         _runEmployees[runId] = employees;
 
-        // Init encrypted total
         _runTotalPaid[runId] = FHE.asEuint64(0);
         _runTotalPaid[runId] = FHE.allowThis(_runTotalPaid[runId]);
 
@@ -238,9 +229,6 @@ contract VeilPayroll is ZamaEthereumConfig {
         emit PayrollRunCreated(runId, count);
     }
 
-    /// @notice Execute a payroll run in sequential batches.
-    ///         Call repeatedly with consecutive ranges: [0, a), [a, b), [b, count).
-    ///         Works for both small and large employee counts.
     function executePayrollRunBatch(uint256 runId, uint256 fromIndex, uint256 toIndex) external onlyEmployer {
         PayrollRun storage run = payrollRuns[runId];
         if (run.createdAt == 0) revert RunNotCreated();
@@ -265,7 +253,7 @@ contract VeilPayroll is ZamaEthereumConfig {
         }
     }
 
-    /// @dev Process a range of employees in a payroll run, crediting balances.
+    /// @dev Process a range of employees: balance += salary (full amount, no tax).
     function _processRunRange(uint256 runId, uint256 from, uint256 to) internal returns (euint64 totalPaid) {
         totalPaid = FHE.asEuint64(0);
         address[] storage employees = _runEmployees[runId];
@@ -274,27 +262,16 @@ contract VeilPayroll is ZamaEthereumConfig {
             address emp = employees[i];
             euint64 salary = salaries[emp];
 
-            euint64 tax = FHE.div(salary, taxDivisor);
-            ebool valid = FHE.le(tax, salary);
-            euint64 netPay = FHE.sub(salary, tax);
-            netPay = FHE.select(valid, netPay, FHE.asEuint64(0));
-
-            balances[emp] = FHE.add(balances[emp], netPay);
+            balances[emp] = FHE.add(balances[emp], salary);
             balances[emp] = FHE.allowThis(balances[emp]);
             balances[emp] = FHE.allow(balances[emp], emp);
 
-            totalPaid = FHE.add(totalPaid, netPay);
+            totalPaid = FHE.add(totalPaid, salary);
         }
     }
 
-    function setTaxRate(uint64 divisor) external onlyEmployer {
-        if (divisor < 2 || divisor > 100) revert InvalidTaxDivisor();
-        taxDivisor = divisor;
-        emit TaxRateUpdated(divisor);
-    }
-
     // ════════════════════════════════════════════════════
-    //  Payroll run queries
+    //  Pay run queries
     // ════════════════════════════════════════════════════
 
     function getPayrollRun(uint256 runId) external view returns (PayrollRun memory) {
@@ -327,10 +304,6 @@ contract VeilPayroll is ZamaEthereumConfig {
         ebool sufficient = FHE.le(encAmount, balances[msg.sender]);
         euint64 deducted = FHE.select(sufficient, encAmount, FHE.asEuint64(0));
 
-        balances[msg.sender] = FHE.sub(balances[msg.sender], deducted);
-        balances[msg.sender] = FHE.allowThis(balances[msg.sender]);
-        balances[msg.sender] = FHE.allow(balances[msg.sender], msg.sender);
-
         _withdrawDeducted[id] = deducted;
         _withdrawDeducted[id] = FHE.allowThis(_withdrawDeducted[id]);
         FHE.makePubliclyDecryptable(_withdrawDeducted[id]);
@@ -359,6 +332,11 @@ contract VeilPayroll is ZamaEthereumConfig {
         req.pending = false;
 
         if (decryptedAmount == uint64(req.amount)) {
+            euint64 encAmount = FHE.asEuint64(uint64(req.amount));
+            balances[req.user] = FHE.sub(balances[req.user], encAmount);
+            balances[req.user] = FHE.allowThis(balances[req.user]);
+            balances[req.user] = FHE.allow(balances[req.user], req.user);
+
             payToken.safeTransfer(req.user, req.amount);
             emit WithdrawCompleted(id, req.user, req.amount);
         } else {

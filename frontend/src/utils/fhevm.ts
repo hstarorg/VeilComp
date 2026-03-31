@@ -178,7 +178,7 @@ export async function decryptUint64(
   await ensureReady(walletClient);
 
   const userAddress = walletClient.account!.address;
-  const timestamp = Date.now();
+  const timestamp = Math.floor(Date.now() / 1000);
   const durationDays = 10;
 
   const eip712 = instance.createEIP712(keypair.publicKey, [contractAddress], timestamp, durationDays);

@@ -6,7 +6,9 @@ import { EmployerHome } from "@/pages/employer/EmployerHome";
 import { DeployPage } from "@/pages/employer/DeployPage";
 import { DashboardPage } from "@/pages/employer/DashboardPage";
 import { EmployeesPage } from "@/pages/employer/EmployeesPage";
-import { PayrollPage } from "@/pages/employer/PayrollPage";
+import { PayrollListPage } from "@/pages/employer/PayrollListPage";
+import { PayrollCreatePage } from "@/pages/employer/PayrollCreatePage";
+import { PayrollDetailPage } from "@/pages/employer/PayrollDetailPage";
 import { MockTokenPage } from "@/pages/mock/MockTokenPage";
 
 export const router = createBrowserRouter([
@@ -14,24 +16,15 @@ export const router = createBrowserRouter([
     path: "/",
     element: <Layout />,
     children: [
-      // Default: employee view (my payrolls list)
       { index: true, element: <HomePage /> },
-
-      // Employee: salary details for a specific company
       { path: "company/:address", element: <CompensationPage /> },
-
-      // Employer: my payroll contracts list
       { path: "employer", element: <EmployerHome /> },
-
-      // Employer: deploy new payroll
       { path: "employer/deploy", element: <DeployPage /> },
-
-      // Employer: specific payroll management
       { path: "employer/:address", element: <DashboardPage /> },
       { path: "employer/:address/employees", element: <EmployeesPage /> },
-      { path: "employer/:address/payroll", element: <PayrollPage /> },
-
-      // Mock tools (testnet)
+      { path: "employer/:address/payroll", element: <PayrollListPage /> },
+      { path: "employer/:address/payroll/new", element: <PayrollCreatePage /> },
+      { path: "employer/:address/payroll/:runId", element: <PayrollDetailPage /> },
       { path: "mock", element: <MockTokenPage /> },
     ],
   },

@@ -17,17 +17,14 @@ describe("VeilPayroll", function () {
   before(async function () {
     [employer, emp1, emp2, , outsider] = await hre.ethers.getSigners();
 
-    // Deploy mock USDT
     const MockERC20 = await hre.ethers.getContractFactory("MockUSDT");
     mockUsdt = await MockERC20.deploy();
     await mockUsdt.waitForDeployment();
 
-    // Deploy factory
     const Factory = await hre.ethers.getContractFactory("VeilFactory");
     factory = await Factory.deploy();
     await factory.waitForDeployment();
 
-    // Create payroll via factory
     const salt = ethers.id("test-payroll");
     const tx = await factory.connect(employer).createPayroll(salt, await mockUsdt.getAddress());
     await tx.wait();
@@ -38,12 +35,10 @@ describe("VeilPayroll", function () {
 
     await hre.fhevm.assertCoprocessorInitialized(payroll, "VeilPayroll");
 
-    // Fund employer: mint USDT and deposit into payroll
     await mockUsdt.mint(employer.address, 500_000_000000n);
     await (await mockUsdt.connect(employer).approve(payrollAddr, 500_000_000000n)).wait();
     await (await payroll.connect(employer).deposit(500_000_000000n)).wait();
 
-    // Add employees
     const input1 = hre.fhevm.createEncryptedInput(payrollAddr, employer.address);
     input1.add64(5000_000000); // 5000 USDT
     const enc1 = await input1.encrypt();
@@ -55,8 +50,6 @@ describe("VeilPayroll", function () {
     await (await payroll.addEmployee(emp2.address, enc2.handles[0], enc2.inputProof)).wait();
   });
 
-  // ── Fund management ──
-
   describe("Fund management", function () {
     it("pool balance reflects deposit", async function () {
       expect(await payroll.getPoolBalance()).to.equal(500_000_000000n);
@@ -66,8 +59,6 @@ describe("VeilPayroll", function () {
       await expect(payroll.connect(outsider).deposit(100)).to.be.revertedWithCustomError(payroll, "OnlyEmployer");
     });
   });
-
-  // ── Employee management ──
 
   describe("Employee management", function () {
     it("employees are registered", async function () {
@@ -116,7 +107,6 @@ describe("VeilPayroll", function () {
       );
       expect(salary).to.equal(6000_000000n);
 
-      // Reset to 5000
       const inputR = hre.fhevm.createEncryptedInput(payrollAddr, employer.address);
       inputR.add64(5000_000000);
       const encR = await inputR.encrypt();
@@ -128,11 +118,9 @@ describe("VeilPayroll", function () {
       expect(await payroll.isEmployee(emp2.address)).to.be.false;
       expect(await payroll.getEmployeeCount()).to.equal(1);
 
-      // Reverse index updated
       const payrolls = await factory.connect(emp2).getMyPayrolls();
       expect(payrolls.length).to.equal(0);
 
-      // Re-add
       const input = hre.fhevm.createEncryptedInput(payrollAddr, employer.address);
       input.add64(8000_000000);
       const enc = await input.encrypt();
@@ -141,16 +129,14 @@ describe("VeilPayroll", function () {
     });
   });
 
-  // ── Payroll runs (monthly lifecycle) ──
-
-  describe("Payroll runs", function () {
-    it("employer can create a payroll run with selected employees", async function () {
+  describe("Pay runs", function () {
+    it("employer can create a pay run with selected employees", async function () {
       const tx = await payroll.createPayrollRun([emp1.address, emp2.address]);
       await tx.wait();
 
       const run = await payroll.getPayrollRun(0);
       expect(run.employeeCount).to.equal(2);
-      expect(run.status).to.equal(0); // Created
+      expect(run.status).to.equal(0);
       expect(run.createdAt).to.be.greaterThan(0);
       expect(run.executedAt).to.equal(0);
     });
@@ -174,12 +160,12 @@ describe("VeilPayroll", function () {
       ).to.be.revertedWithCustomError(payroll, "NoEmployees");
     });
 
-    it("employer can execute payroll run via batch", async function () {
+    it("employer can execute pay run via batch", async function () {
       const tx = await payroll.executePayrollRunBatch(0, 0, 2);
       await tx.wait();
 
       const run = await payroll.getPayrollRun(0);
-      expect(run.status).to.equal(1); // Executed
+      expect(run.status).to.equal(1);
       expect(run.executedAt).to.be.greaterThan(0);
     });
 
@@ -187,31 +173,30 @@ describe("VeilPayroll", function () {
       await expect(payroll.executePayrollRunBatch(0, 0, 2)).to.be.revertedWithCustomError(payroll, "RunAlreadyExecuted");
     });
 
-    it("payroll total is correct", async function () {
+    it("pay run total is correct (full salary, no tax)", async function () {
       const encTotal = await payroll.connect(employer).getRunTotalPaid(0);
       const total = await hre.fhevm.userDecryptEuint(
         FhevmType.euint64, encTotal, payrollAddr, employer as unknown as ethers.Signer
       );
-      // emp1: 5000*0.8=4000, emp2: 8000*0.8=6400, total=10400
-      expect(total).to.equal(10_400_000000n);
+      // emp1: 5000, emp2: 8000, total = 13000
+      expect(total).to.equal(13_000_000000n);
     });
 
-    it("employee balances credited after payroll run", async function () {
+    it("employee balances credited full salary", async function () {
       const encBal1 = await payroll.connect(emp1).getMyBalance();
       const bal1 = await hre.fhevm.userDecryptEuint(
         FhevmType.euint64, encBal1, payrollAddr, emp1 as unknown as ethers.Signer
       );
-      expect(bal1).to.equal(4000_000000n);
+      expect(bal1).to.equal(5000_000000n);
 
       const encBal2 = await payroll.connect(emp2).getMyBalance();
       const bal2 = await hre.fhevm.userDecryptEuint(
         FhevmType.euint64, encBal2, payrollAddr, emp2 as unknown as ethers.Signer
       );
-      expect(bal2).to.equal(6400_000000n);
+      expect(bal2).to.equal(8000_000000n);
     });
 
     it("can create and execute a second run (balances accumulate)", async function () {
-      // Create run with only emp1
       const tx1 = await payroll.createPayrollRun([emp1.address]);
       await tx1.wait();
       expect(await payroll.getRunCount()).to.equal(2);
@@ -219,12 +204,12 @@ describe("VeilPayroll", function () {
       const tx2 = await payroll.executePayrollRunBatch(1, 0, 1);
       await tx2.wait();
 
-      // emp1 balance: 4000 + 4000 = 8000
+      // emp1 balance: 5000 + 5000 = 10000
       const encBal = await payroll.connect(emp1).getMyBalance();
       const bal = await hre.fhevm.userDecryptEuint(
         FhevmType.euint64, encBal, payrollAddr, emp1 as unknown as ethers.Signer
       );
-      expect(bal).to.equal(8000_000000n);
+      expect(bal).to.equal(10_000_000000n);
     });
 
     it("non-employer cannot create or execute runs", async function () {
@@ -237,21 +222,4 @@ describe("VeilPayroll", function () {
       ).to.be.revertedWithCustomError(payroll, "OnlyEmployer");
     });
   });
-
-  // ── Tax rate ──
-
-  describe("Tax rate", function () {
-    it("employer can change tax rate", async function () {
-      await (await payroll.setTaxRate(10)).wait();
-      expect(await payroll.taxDivisor()).to.equal(10);
-      await (await payroll.setTaxRate(5)).wait();
-    });
-
-    it("invalid divisor reverts", async function () {
-      await expect(payroll.setTaxRate(0)).to.be.revertedWithCustomError(payroll, "InvalidTaxDivisor");
-      await expect(payroll.setTaxRate(1)).to.be.revertedWithCustomError(payroll, "InvalidTaxDivisor");
-      await expect(payroll.setTaxRate(101)).to.be.revertedWithCustomError(payroll, "InvalidTaxDivisor");
-    });
-  });
-
 });

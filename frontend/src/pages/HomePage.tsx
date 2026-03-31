@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import type { Address } from "viem";
-import { Shield, Lock, DollarSign, CalendarCheck, Building2, ArrowRight, Briefcase } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Shield, Lock, DollarSign, CalendarCheck, Building2, Briefcase, Wallet } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EncryptedValue } from "@/components/common/EncryptedValue";
 import { useApp } from "@/contexts/AppContext";
 import { FACTORY_ADDRESS, FACTORY_ABI, PAYROLL_ABI, ERC20_ABI } from "@/utils/contracts";
 import type { PayrollInfo } from "@/types";
@@ -51,11 +53,16 @@ function FeatureCard({ icon, title, desc }: { icon: React.ReactNode; title: stri
   );
 }
 
-// ─── Employee Home — my payrolls list ──────────────
+// ─── Employee Home — my payrolls as cards ──────────────
+
+interface PayrollCardData extends PayrollInfo {
+  salaryHandle: string;
+  balanceHandle: string;
+}
 
 function EmployeeHome() {
-  const { publicClient, address } = useApp();
-  const [payrolls, setPayrolls] = useState<PayrollInfo[]>([]);
+  const { publicClient, address, onDecrypt } = useApp();
+  const [payrolls, setPayrolls] = useState<PayrollCardData[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -74,27 +81,29 @@ function EmployeeHome() {
           account: address as Address,
         }) as `0x${string}`[];
 
-        const infos: PayrollInfo[] = await Promise.all(
+        const infos: PayrollCardData[] = await Promise.all(
           addrs.map(async (addr) => {
-            const [employerAddr, tokenAddr] = await Promise.all([
+            const [employerAddr, tokenAddr, salary, balance] = await Promise.all([
               publicClient!.readContract({ address: addr, abi: PAYROLL_ABI, functionName: "employer" }),
               publicClient!.readContract({ address: addr, abi: PAYROLL_ABI, functionName: "payToken" }),
+              publicClient!.readContract({ address: addr, abi: PAYROLL_ABI, functionName: "getMySalary", account: address as Address }),
+              publicClient!.readContract({ address: addr, abi: PAYROLL_ABI, functionName: "getMyBalance", account: address as Address }),
             ]);
 
             let tokenSymbol = "ERC20";
             try {
               tokenSymbol = await publicClient!.readContract({
-                address: tokenAddr as `0x${string}`,
-                abi: ERC20_ABI,
-                functionName: "symbol",
+                address: tokenAddr as `0x${string}`, abi: ERC20_ABI, functionName: "symbol",
               }) as string;
-            } catch { /* fallback */ }
+            } catch {}
 
             return {
               address: addr,
               payToken: tokenAddr as `0x${string}`,
               employer: employerAddr as `0x${string}`,
               tokenSymbol,
+              salaryHandle: salary as string,
+              balanceHandle: balance as string,
             };
           })
         );
@@ -127,29 +136,45 @@ function EmployeeHome() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-4">
+        <div className="grid gap-5 sm:grid-cols-2">
           {payrolls.map((p) => (
-            <Link key={p.address} to={`/company/${p.address}`}>
-              <Card className="transition hover:border-gray-700">
-                <CardContent className="flex items-center justify-between p-5">
-                  <div className="flex items-center gap-4">
-                    <Building2 className="h-8 w-8 text-indigo-400/70" />
-                    <div>
-                      <p className="text-sm font-medium font-mono">
-                        {p.employer.slice(0, 6)}...{p.employer.slice(-4)}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Payroll: {p.address.slice(0, 6)}...{p.address.slice(-4)}
-                      </p>
-                    </div>
+            <Card key={p.address} className="transition hover:border-gray-700">
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <div className="flex items-center gap-3">
+                  <Building2 className="h-6 w-6 text-indigo-400/70" />
+                  <div>
+                    <CardTitle className="text-sm font-mono">
+                      {p.employer.slice(0, 6)}...{p.employer.slice(-4)}
+                    </CardTitle>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {p.address.slice(0, 6)}...{p.address.slice(-4)}
+                    </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <Badge>{p.tokenSymbol}</Badge>
-                    <ArrowRight className="h-4 w-4 text-gray-600" />
+                </div>
+                <Badge>{p.tokenSymbol}</Badge>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-gray-800/40 p-3">
+                    <p className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+                      <DollarSign className="h-3 w-3" /> Monthly Salary
+                    </p>
+                    <EncryptedValue handle={p.salaryHandle} contractAddress={p.address} onDecrypt={onDecrypt} />
                   </div>
-                </CardContent>
-              </Card>
-            </Link>
+                  <div className="rounded-lg bg-gray-800/40 p-3">
+                    <p className="flex items-center gap-1.5 text-xs text-gray-500 mb-1">
+                      <Wallet className="h-3 w-3" /> Balance
+                    </p>
+                    <EncryptedValue handle={p.balanceHandle} contractAddress={p.address} onDecrypt={onDecrypt} />
+                  </div>
+                </div>
+                <Link to={`/company/${p.address}`}>
+                  <Button variant="ghost" size="sm" className="w-full text-xs text-gray-400 hover:text-gray-200">
+                    View Details
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}

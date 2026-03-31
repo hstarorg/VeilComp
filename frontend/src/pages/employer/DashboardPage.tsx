@@ -161,7 +161,7 @@ export function DashboardPage() {
       {/* Actions */}
       <div className="flex gap-3">
         <Link to={`/employer/${payrollAddr}/employees`}><Button>Manage Employees</Button></Link>
-        <Link to={`/employer/${payrollAddr}/payroll`}><Button variant="success">Run Payroll</Button></Link>
+        <Link to={`/employer/${payrollAddr}/payroll`}><Button variant="success">Monthly Payroll</Button></Link>
       </div>
     </div>
   );
