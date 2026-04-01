@@ -26,9 +26,9 @@ export function EmployerHome() {
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold tracking-tight">My Contracts</h1>
+        <h1 className="text-2xl font-bold tracking-tight">My Company Payrolls</h1>
         <Link to="/employer/deploy">
-          <Button size="sm" className="transition-all duration-200"><Plus className="mr-1 h-4 w-4" /> New Contract</Button>
+          <Button size="sm" className="transition-all duration-200"><Plus className="mr-1 h-4 w-4" /> New Company Payroll</Button>
         </Link>
       </div>
 
@@ -39,10 +39,10 @@ export function EmployerHome() {
               <Rocket className="h-7 w-7 text-indigo-400/60" />
             </div>
             <div>
-              <p className="text-gray-400 font-medium">No contracts yet</p>
-              <p className="mt-1 max-w-xs text-xs text-gray-600">Deploy your first contract to start paying your team confidentially.</p>
+              <p className="text-gray-400 font-medium">No company payroll yet</p>
+              <p className="mt-1 max-w-xs text-xs text-gray-600">Create your first company payroll contract to start paying your team confidentially.</p>
             </div>
-            <Link to="/employer/deploy"><Button className="transition-all duration-200">Deploy Contract</Button></Link>
+            <Link to="/employer/deploy"><Button className="transition-all duration-200">Create Company Payroll</Button></Link>
           </CardContent>
         </Card>
       ) : (

@@ -16,7 +16,7 @@ export function DeployPage() {
   const { walletClient, publicClient, address } = useApp();
   const navigate = useNavigate();
 
-  const [tokenAddress, setTokenAddress] = useState("");
+  const [tokenAddress, setTokenAddress] = useState("0xa2F47b34de37aeAca14488Cb28dBF8Cb6eFaB869");
   const [step, setStep] = useState<Step>("idle");
   const [payrollAddr, setPayrollAddr] = useState("");
   const [error, setError] = useState("");
@@ -90,13 +90,13 @@ export function DeployPage() {
 
   return (
     <div className="flex flex-col items-center pt-8">
-      <h1 className="mb-2 text-2xl font-bold">Deploy Payroll Contract</h1>
-      <p className="mb-8 text-sm text-gray-400">Create a new payroll for your company.</p>
+      <h1 className="mb-2 text-2xl font-bold">Create Company Payroll</h1>
+      <p className="mb-8 text-sm text-gray-400">Deploy a dedicated payroll contract for your company. One contract per token.</p>
 
       <Card className="w-full max-w-lg">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><Rocket className="h-5 w-5 text-indigo-400" /> New Payroll</CardTitle>
-          <CardDescription>Choose the ERC-20 token for salary payments</CardDescription>
+          <CardTitle className="flex items-center gap-2"><Rocket className="h-5 w-5 text-indigo-400" /> New Company Payroll</CardTitle>
+          <CardDescription>Choose the ERC-20 token your company will use to pay salaries</CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
           <div>
@@ -149,13 +149,13 @@ export function DeployPage() {
 
           {step === "idle" && (
             <Button onClick={handleDeploy} disabled={!tokenAddress || !FACTORY_ADDRESS} className="w-full">
-              Deploy Payroll
+              Create Payroll Contract
             </Button>
           )}
 
           {step === "done" && (
             <Button variant="success" onClick={() => navigate(`/employer/${payrollAddr}`)} className="w-full">
-              Go to Dashboard <ArrowRight className="ml-1 h-4 w-4" />
+              Manage Payroll <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           )}
         </CardContent>
